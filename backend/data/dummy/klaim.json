@@ -1,0 +1,34 @@
+[
+  {
+    "claim_id": "c001",
+    "teks_klaim": "Video prajurit TNI AD membubarkan warga di Papua, disebut terjadi minggu ini",
+    "media_url": "https://example.com/viral/video-c001.mp4",
+    "jenis_media": "video",
+    "tanggal_ditemukan": "2026-11-11T08:00:00+07:00",
+    "jumlah_share": 12400,
+    "jumlah_view": 380000,
+    "laju_sebar": 950,
+    "pengikut_pengunggah": 45000
+  },
+  {
+    "claim_id": "c002",
+    "teks_klaim": "Kasad disebut menyatakan 'TNI siap ambil alih pemerintahan sipil'",
+    "media_url": "https://example.com/viral/gambar-c002.jpg",
+    "jenis_media": "gambar",
+    "tanggal_ditemukan": "2026-11-11T09:30:00+07:00",
+    "jumlah_share": 8700,
+    "jumlah_view": 150000,
+    "laju_sebar": 1200,
+    "pengikut_pengunggah": 3200
+  },
+  {
+    "claim_id": "c003",
+    "teks_klaim": "Pendaftaran Bintara TNI AD 2027 dipungut biaya Rp15 juta",
+    "jenis_media": "teks",
+    "tanggal_ditemukan": "2026-11-10T19:00:00+07:00",
+    "jumlah_share": 640,
+    "jumlah_view": 21000,
+    "laju_sebar": 40,
+    "pengikut_pengunggah": 900
+  }
+]

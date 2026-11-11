@@ -1,0 +1,71 @@
+{
+  "_catatan": "Kandidat contoh untuk mode demo (tanpa SERPAPI_KEY). Ganti URL dengan sumber asli kasus demo kalian.",
+  "c001": [
+    {
+      "url": "https://www.youtube.com/watch?v=CONTOH-ASLI-2019",
+      "metode": "frame_match",
+      "kemiripan": 0.93,
+      "jenis_sumber": "media",
+      "judul": "Liputan pengamanan unjuk rasa, Agustus 2019",
+      "tanggal_unggah": "2019-08-21",
+      "cuplikan": "00:42",
+      "resolusi": 1080,
+      "ada_watermark": false,
+      "kecocokan_audio": 0.88,
+      "uploader": "kompastv"
+    },
+    {
+      "url": "https://www.facebook.com/watch/?v=CONTOH-REUPLOAD-2022",
+      "metode": "frame_match",
+      "kemiripan": 0.9,
+      "jenis_sumber": "pribadi",
+      "judul": "Video beredar ulang 2022",
+      "tanggal_unggah": "2022-03-02",
+      "cuplikan": "00:05",
+      "resolusi": 720,
+      "kecocokan_audio": 0.81
+    },
+    {
+      "url": "https://www.tiktok.com/@akun.contoh/video/CONTOH-VIRAL",
+      "metode": "frame_match",
+      "kemiripan": 0.97,
+      "jenis_sumber": "pribadi",
+      "judul": "Narasi baru: disebut terjadi minggu ini",
+      "tanggal_unggah": "2026-11-09",
+      "cuplikan": "00:00",
+      "resolusi": 480,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.95
+    }
+  ],
+  "c002": [
+    {
+      "url": "https://tniad.mil.id/CONTOH-siaran-pers-kasad",
+      "metode": "kutipan",
+      "kemiripan": 0.55,
+      "jenis_sumber": "resmi",
+      "judul": "Siaran pers Kasad: TNI AD tegak lurus pada supremasi sipil",
+      "tanggal_unggah": "2026-11-08",
+      "cuplikan": "Kalimat yang beredar tidak ada dalam sambutan; Kasad menegaskan TNI tunduk pada otoritas sipil."
+    },
+    {
+      "url": "https://www.antaranews.com/CONTOH-berita-sambutan-kasad",
+      "metode": "keyword",
+      "kemiripan": 0.6,
+      "jenis_sumber": "media",
+      "judul": "Kasad beri sambutan di acara pembukaan",
+      "tanggal_unggah": "2026-11-08",
+      "cuplikan": "Dalam sambutannya, Kasad menekankan netralitas dan profesionalitas prajurit."
+    }
+  ],
+  "c003": [
+    {
+      "url": "https://rekrutmen-tniad.mil.id/CONTOH-pengumuman",
+      "metode": "keyword",
+      "kemiripan": 0.7,
+      "jenis_sumber": "resmi",
+      "judul": "Pengumuman resmi penerimaan Bintara TNI AD: tidak dipungut biaya",
+      "tanggal_unggah": "2026-10-01"
+    }
+  ]
+}
