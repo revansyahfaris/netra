@@ -3,4 +3,5 @@ __pycache__/
 .pytest_cache/
 .env
 backend/data/work/
+AI_Blueprint.md
 *.mp4

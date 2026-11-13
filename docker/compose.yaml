@@ -1,0 +1,33 @@
+name: netra_docker
+
+services:
+  stt:
+    image: ghcr.io/speaches-ai/speaches:latest-cuda
+    container_name: netra-stt
+    restart: unless-stopped
+    ports:
+      - "8100:8000"
+    environment:
+      - LOG_LEVEL=info
+      - LOOPBACK_HOST_URL=http://localhost:8000
+      - WHISPER__INFERENCE_DEVICE=cuda
+      - WHISPER__COMPUTE_TYPE=float16
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - speaches-hf-hub-cache:/home/ubuntu/.cache/huggingface/hub
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  speaches-hf-hub-cache:
+

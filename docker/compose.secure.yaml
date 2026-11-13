@@ -1,0 +1,8 @@
+services:
+  stt:
+    environment:
+      - API_KEY=${STT_API_KEY:?Isi STT_API_KEY di docker/.env terlebih dahulu}
+      - ENABLE_UI=false
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -H \"Authorization: Bearer $${API_KEY}\" http://localhost:8000/health"]
+
