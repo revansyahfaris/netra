@@ -16,6 +16,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
 
+# Kosongkan untuk memakai SQLite lokal (backend/data/netra.db)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Isi data demo otomatis saat database masih kosong
+SEED_KALAU_KOSONG = os.getenv("SEED_KALAU_KOSONG", "1") != "0"
+# Izinkan POST /seed (reset data demo). Matikan saat dipakai sungguhan.
+IZINKAN_SEED = os.getenv("IZINKAN_SEED", "1") != "0"
+
 DATA_DIR = BASE_DIR / "data"
 DUMMY_DIR = DATA_DIR / "dummy"
 WORK_DIR = DATA_DIR / "work"  # tempat unduhan video & frame sementara

@@ -3,4 +3,12 @@ __pycache__/
 .pytest_cache/
 .env
 backend/data/work/
+backend/data/*.db
+backend/data/*.db-journal
 *.mp4
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+dashboard/.env*.local
+npm-debug.log*
+.DS_Store

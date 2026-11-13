@@ -22,6 +22,27 @@
     "pengikut_pengunggah": 3200
   },
   {
+    "claim_id": "c001b",
+    "teks_klaim": "Video pengamanan disebut baru terjadi pekan ini, beredar tanpa menyebut lokasi",
+    "media_url": "https://example.com/viral/video-c001b.mp4",
+    "jenis_media": "video",
+    "tanggal_ditemukan": "2026-11-12T07:00:00+07:00",
+    "jumlah_share": 5600,
+    "jumlah_view": 190000,
+    "laju_sebar": 420,
+    "pengikut_pengunggah": 21000
+  },
+  {
+    "claim_id": "c004",
+    "teks_klaim": "Disebut ada pengumuman resmi TNI AD tentang pembagian sembako di markas, tanpa sumber",
+    "jenis_media": "teks",
+    "tanggal_ditemukan": "2026-11-12T10:15:00+07:00",
+    "jumlah_share": 180,
+    "jumlah_view": 4200,
+    "laju_sebar": 12,
+    "pengikut_pengunggah": 700
+  },
+  {
     "claim_id": "c003",
     "teks_klaim": "Pendaftaran Bintara TNI AD 2027 dipungut biaya Rp15 juta",
     "jenis_media": "teks",

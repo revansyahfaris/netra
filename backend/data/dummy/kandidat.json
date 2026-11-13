@@ -38,6 +38,44 @@
       "kecocokan_audio": 0.95
     }
   ],
+  "c001b": [
+    {
+      "url": "https://www.tiktok.com/@akun.lama/video/CONTOH-2023",
+      "metode": "frame_match",
+      "kemiripan": 0.94,
+      "jenis_sumber": "pribadi",
+      "judul": "Video serupa, unggahan 2023",
+      "tanggal_unggah": "2023-04-11",
+      "cuplikan": "00:18",
+      "resolusi": 720,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.9
+    },
+    {
+      "url": "https://www.facebook.com/watch/?v=CONTOH-REUPLOAD-2025",
+      "metode": "frame_match",
+      "kemiripan": 0.91,
+      "jenis_sumber": "pribadi",
+      "judul": "Unggahan ulang tanpa sumber",
+      "tanggal_unggah": "2025-09-02",
+      "cuplikan": "00:04",
+      "resolusi": 480,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.86
+    },
+    {
+      "url": "https://www.instagram.com/p/CONTOH-2026/",
+      "metode": "frame_match",
+      "kemiripan": 0.96,
+      "jenis_sumber": "pribadi",
+      "judul": "Narasi baru: disebut pekan ini",
+      "tanggal_unggah": "2026-11-12",
+      "cuplikan": "00:00",
+      "resolusi": 480,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.93
+    }
+  ],
   "c002": [
     {
       "url": "https://tniad.mil.id/CONTOH-siaran-pers-kasad",
