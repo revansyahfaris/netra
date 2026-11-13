@@ -16,7 +16,7 @@ Fitur beku: **Sabtu 14 Nov 20.00**. Setelah itu hanya perbaikan bug dan perekama
 
 | Waktu | Target | Status |
 |---|---|---|
-| Jum 13, 22.00 | Kontrak v2 beku, DB jalan, dashboard skeleton | `[ ]` |
+| Jum 13, 22.00 | Kontrak v2 beku, DB jalan, dashboard skeleton | `[x]` |
 | Sab 14, 12.00 | Kasus formal end-to-end (RAG → bukti → approval) | `[ ]` |
 | Sab 14, 20.00 | Kasus informal + worst case, **fitur beku** | `[ ]` |
 | Sab 14, 23.00 | Video demo selesai | `[ ]` |
@@ -69,15 +69,15 @@ Fitur beku: **Sabtu 14 Nov 20.00**. Setelah itu hanya perbaikan bug dan perekama
 
 ### Fase 5 — Integrasi & demo
 - [x] 3 status tampil benar di UI (terbukti / tidak ditemukan / belum bisa diverifikasi)
-- [x] Adaptor `ai/` bila bentuk output beda (tanpa mengubah logika AI)
+- [ ] Adaptor `ai/` bila bentuk output beda (tanpa mengubah logika AI) — menunggu Adriel
 - [x] `docs/skrip-demo.md`
-- [x] Bantu rekam video demo
+- [ ] Bantu rekam video demo
 
 ### Fase 6 — Rilis
 - [x] README: cara jalan, env, arsitektur
 - [x] `pytest -q` + `npm run build` terakhir
-- [x] PR ke `main`, minta review Faris
-- [x] (opsional) deploy dashboard Vercel + backend Render — hanya bila waktu tersisa
+- [ ] PR ke `main`, minta review Faris (branch sudah di-push)
+- [ ] (opsional) deploy dashboard Vercel + backend Render — hanya bila waktu tersisa
 
 ---
 
