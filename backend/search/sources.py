@@ -15,6 +15,9 @@ DOMAIN_MEDIA = {
     "tribunnews.com", "kumparan.com", "republika.co.id", "okezone.com", "sindonews.com",
     "metrotvnews.com", "tvonenews.com", "beritasatu.com", "idntimes.com", "suara.com",
     "cnbcindonesia.com", "jawapos.com", "medcom.id", "inews.id", "turnbackhoax.id", "cekfakta.com",
+    "kompas.id", "kompas.tv", "espos.id", "solopos.com", "suarakarya.id", "merdeka.com", "viva.co.id",
+    "jpnn.com", "rri.co.id", "tvrinews.com", "bisnis.com", "mediaindonesia.com", "gatra.com", "kontan.co.id",
+    "kompasiana.com", "harianjogja.com", "pikiran-rakyat.com", "jabarekspres.com", "bbc.com", "reuters.com",
 }
 KANAL_MEDIA = {"kompastv", "kompas tv", "metro tv", "metrotv", "tvonenews", "cnn indonesia", "berita satu", "inews", "detikcom", "tribunnews"}
 

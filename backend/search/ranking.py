@@ -2,7 +2,8 @@
 
 Komponen (0-1) dan bobotnya:
 - kemiripan     0.30  seberapa cocok isi kandidat dengan konten viral
-- tanggal       0.25  makin awal diunggah makin tinggi (relatif terhadap kandidat lain)
+- tanggal       0.25  makin awal diunggah makin tinggi (relatif terhadap kandidat lain),
+                      tapi hanya dihitung penuh kalau kandidatnya relevan (lihat RELEVAN_PENUH)
 - jenis_sumber  0.15  resmi > media > pribadi
 - resolusi      0.10  makin tajam makin mungkin asli (unggahan ulang biasanya turun kualitas)
 - bersih        0.10  tanpa watermark/overlay
@@ -16,7 +17,9 @@ from .models import Temuan
 
 BOBOT = {"kemiripan": 0.30, "tanggal": 0.25, "jenis_sumber": 0.15, "resolusi": 0.10, "bersih": 0.10, "audio": 0.10}
 NILAI_JENIS = {"resmi": 1.0, "media": 0.7, "pribadi": 0.3}
-KEMIRIPAN_MIN = 0.3   # kandidat di bawah ini dibuang
+KEMIRIPAN_MIN = 0.35  # kandidat di bawah ini dibuang
+RELEVAN_PENUH = 0.7   # kemiripan minimal agar nilai "paling awal" dihitung penuh.
+                      # Tanpa ini, hasil lama yang tidak nyambung bisa jadi juara hanya karena tua.
 
 
 def _utc(dt):
@@ -38,7 +41,7 @@ def nilai_tanggal(semua: list[Temuan]) -> dict[int, float]:
 def komponen(t: Temuan, nilai_tgl: float | None) -> dict[str, float]:
     k = {"kemiripan": t.kemiripan, "jenis_sumber": NILAI_JENIS.get(t.jenis_sumber, 0.3)}
     if nilai_tgl is not None:
-        k["tanggal"] = nilai_tgl
+        k["tanggal"] = nilai_tgl * min(1.0, t.kemiripan / RELEVAN_PENUH)
     if t.resolusi:
         k["resolusi"] = min(t.resolusi / 1080, 1.0)
     if t.ada_watermark is not None:
