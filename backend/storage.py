@@ -57,7 +57,7 @@ class _Postgres:
     def _tabel(koleksi: str) -> str:
         if not re.fullmatch(r"[a-z_]+", koleksi):
             raise ValueError("nama koleksi tidak valid")
-        return f"netra_{koleksi}"
+        return f"{config.TABLE_PREFIX}{koleksi}"
 
     def siapkan(self, koleksi):
         with self.pool.connection() as c:

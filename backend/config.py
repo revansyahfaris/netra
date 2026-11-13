@@ -34,3 +34,6 @@ def llm_aktif() -> bool:
 
 def search_aktif() -> bool:
     return bool(SERPAPI_KEY)
+
+# Awalan nama tabel milik backend, supaya tidak bentrok dengan tabel lain di database yang sama
+TABLE_PREFIX = os.getenv("TABLE_PREFIX", "netra_api_")
