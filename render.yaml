@@ -1,5 +1,5 @@
 # Deploy ke Render: New + > Blueprint > pilih repo ini.
-# Isi GEMINI_API_KEY dan SERPAPI_KEY di dashboard Render (jangan di file ini).
+# Isi GEMINI_API_KEY, SERPAPI_KEY, dan DATABASE_URL di dashboard Render (jangan di file ini).
 services:
   - type: web
     name: netra-api
@@ -11,6 +11,8 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: SERPAPI_KEY
+        sync: false
+      - key: DATABASE_URL
         sync: false
       - key: GEMINI_MODEL
         value: gemini-3.1-flash-lite

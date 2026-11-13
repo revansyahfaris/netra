@@ -8,3 +8,4 @@ imagehash>=4.3
 pillow>=10.0
 numpy>=1.26
 pytest>=8.0
+psycopg[binary,pool]>=3.2

@@ -26,21 +26,25 @@ from schemas import (
     BuktiPublik, DrafKlarifikasi, HasilPencarian, HasilVerifikasi, KeputusanPetugas, Klaim, Persetujuan,
 )
 from search import cari_sumber
+from storage import MODE as MODE_PENYIMPANAN
+from storage import Koleksi
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-# Penyimpanan sementara di memori (hilang saat server restart)
-KLAIM: dict[str, Klaim] = {}
-PENCARIAN: dict[str, HasilPencarian] = {}
-PROSES_PENCARIAN: dict[str, dict] = {}
-VERIFIKASI: dict[str, HasilVerifikasi] = {}
-PERSETUJUAN: dict[str, Persetujuan] = {}
+# Penyimpanan: Postgres kalau DATABASE_URL terisi, memori kalau kosong (lihat storage.py)
+KLAIM = Koleksi("klaim", Klaim)
+PENCARIAN = Koleksi("pencarian", HasilPencarian)
+PROSES_PENCARIAN = Koleksi("proses_pencarian")
+VERIFIKASI = Koleksi("verifikasi", HasilVerifikasi)
+PERSETUJUAN = Koleksi("persetujuan", Persetujuan)
 
 
 def muat_dummy():
     f = config.DUMMY_DIR / "klaim.json"
     if f.exists():
         for item in json.loads(f.read_text(encoding="utf-8")):
+            if item["claim_id"] in KLAIM:   # jangan timpa data yang sudah ada di database
+                continue
             k = hitung_prioritas(Klaim(**item))
             KLAIM[k.claim_id] = k
 
@@ -70,6 +74,7 @@ def health():
         "jumlah_klaim": len(KLAIM),
         "llm": "aktif" if config.llm_aktif() else "fallback keyword",
         "pencarian": "live" if config.search_aktif() else "demo",
+        "penyimpanan": MODE_PENYIMPANAN,
     }
 
 

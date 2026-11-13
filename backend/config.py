@@ -18,6 +18,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 # Model untuk OCR, perbandingan & klarifikasi (modul Adriel). Default sama dengan GEMINI_MODEL.
 GEMINI_MODEL_VERIFIKASI = os.getenv("GEMINI_MODEL_VERIFIKASI", "") or GEMINI_MODEL
 SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
+# Postgres (Neon). Kosong = simpan di memori.
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 DATA_DIR = BASE_DIR / "data"
 DUMMY_DIR = DATA_DIR / "dummy"

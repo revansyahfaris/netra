@@ -84,11 +84,18 @@ status keluarannya `belum_bisa_diverifikasi` / `tidak_ditemukan` dan dieskalasi 
 
 1. Push repo ke GitHub.
 2. Di Render: **New + → Blueprint**, pilih repo ini (memakai `render.yaml` dan `backend/Dockerfile`).
-3. Isi `GEMINI_API_KEY` dan `SERPAPI_KEY` di tab Environment.
+3. Isi `GEMINI_API_KEY`, `SERPAPI_KEY`, dan `DATABASE_URL` di tab Environment.
 4. Cek `https://<nama-service>.onrender.com/health`.
 
 Paket gratis Render tidur setelah tidak dipakai, jadi buka `/health` sebelum demo supaya server bangun.
-Data masih disimpan di memori: setiap restart kembali ke data demo.
+
+## Penyimpanan
+
+Isi `DATABASE_URL` (Postgres/Neon) supaya data tetap ada walau server restart. Backend membuat sendiri
+tabel `netra_klaim`, `netra_pencarian`, `netra_proses_pencarian`, `netra_verifikasi`, `netra_persetujuan`
+(kolom `claim_id`, `data` JSONB, `updated_at`). Hanya backend yang menulis ke tabel ini; dashboard lewat API.
+Kalau `DATABASE_URL` kosong atau database tidak bisa dihubungi, data disimpan di memori.
+Cek mode aktif di `GET /health` (`penyimpanan`).
 
 ## Tes
 
