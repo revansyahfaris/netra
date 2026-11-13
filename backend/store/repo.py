@@ -240,7 +240,8 @@ class Repo:
             eskalasi = ses.scalar(select(func.count()).select_from(VerifikasiRow)
                                   .where(VerifikasiRow.perlu_eskalasi.is_(True))) or 0
             menunggu = ses.scalar(select(func.count()).select_from(VerifikasiRow)
-                                  .where(VerifikasiRow.status_persetujuan == "menunggu")) or 0
+                                  .where(VerifikasiRow.status_persetujuan == "menunggu")
+                                  .where(VerifikasiRow.status == "terbukti_diubah")) or 0
             rows = list(ses.scalars(select(VerifikasiRow)))
         waktu = [r.data.get("waktu_proses_detik") for r in rows if r.data.get("waktu_proses_detik")]
         bukti = sum(len(r.data.get("bukti") or []) for r in rows)

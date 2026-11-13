@@ -109,11 +109,17 @@ def test_data_bertahan_di_repo_baru(repo, tmp_path):
 def test_statistik(repo):
     repo.simpan_klaim(klaim("a"))
     repo.simpan_klaim(klaim("b"))
+    repo.simpan_klaim(klaim("c"))
     repo.simpan_verifikasi(verifikasi("a"))
+    repo.simpan_verifikasi(verifikasi("b", "belum_bisa_diverifikasi"))
+    repo.simpan_verifikasi(verifikasi("c", "tidak_ditemukan"))
     s = repo.statistik()
-    assert s["total_klaim"] == 2
+    assert s["total_klaim"] == 3
     assert s["per_status_pipeline"]["menunggu_persetujuan"] == 1
     assert s["per_status_verifikasi"]["terbukti_diubah"] == 1
+    # Yang dieskalasi tidak boleh dihitung sebagai antrean persetujuan
+    assert s["menunggu_persetujuan"] == 1
+    assert s["perlu_eskalasi"] == 2
 
 
 def test_seed_idempoten(repo):
