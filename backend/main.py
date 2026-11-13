@@ -170,6 +170,20 @@ def jalankan_verifikasi(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifik
                 "Kandidat sumber ditemukan, tetapi yang tertua pun berasal dari akun pribadi "
                 "dan/atau berwatermark. Tidak ada sumber yang bisa dianggap otentik."
             ),
+            bukti=[
+                Bukti(
+                    jenis="metadata",
+                    url=k.url,
+                    cuplikan=k.cuplikan,
+                    teks_sumber=k.judul or None,
+                    catatan=(
+                        f"Kandidat skor {k.skor or 0:.2f}, diunggah "
+                        f"{k.tanggal_unggah:%d %b %Y} oleh sumber {k.jenis_sumber}"
+                        + (" dan berwatermark" if k.ada_watermark else "")
+                    ),
+                )
+                for k in kandidat
+            ],
             perlu_eskalasi=True,
             metode=["frame_match"],
             waktu_proses_detik=round(time.perf_counter() - mulai, 3),
@@ -220,14 +234,14 @@ def jalankan_verifikasi(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifik
         keyakinan=utama.skor,
         metode=["frame_match"] if klaim.jenis_media == "video" else ["rag"],
         draf_klarifikasi=DrafKlarifikasi(
-            kartu="[DRAF] Konten ini bukan kejadian baru. Sumber asli lebih awal dan konteksnya berbeda.",
-            pendek="[DRAF] Video/klaim ini sudah pernah beredar sebelumnya dengan konteks berbeda.",
+            kartu="Konten ini bukan kejadian baru. Sumber asli lebih awal dan konteksnya berbeda.",
+            pendek="Video/klaim ini sudah pernah beredar sebelumnya dengan konteks berbeda.",
             whatsapp=(
-                "[DRAF] Cek fakta: konten yang beredar berasal dari "
+                "Cek fakta: konten yang beredar berasal dari "
                 f"{utama.url} yang diunggah {utama.tanggal_unggah:%d/%m/%Y}. "
                 "Narasi yang beredar tidak sesuai dengan konteks aslinya."
                 if utama.tanggal_unggah else
-                f"[DRAF] Cek fakta: konten yang beredar berasal dari {utama.url}."
+                f"Cek fakta: konten yang beredar berasal dari {utama.url}."
             ),
         ),
         perlu_eskalasi=False,
