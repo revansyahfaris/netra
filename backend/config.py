@@ -23,9 +23,16 @@ GEMINI_API_KEY = _key("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 # Model untuk OCR, perbandingan & klarifikasi (modul Adriel). Default sama dengan GEMINI_MODEL.
 GEMINI_MODEL_VERIFIKASI = os.getenv("GEMINI_MODEL_VERIFIKASI", "") or GEMINI_MODEL
+GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 SERPAPI_KEY = _key("SERPAPI_KEY")
 # Postgres (Neon). Kosongkan untuk memakai SQLite lokal (backend/data/netra.db)
 DATABASE_URL = _key("DATABASE_URL")
+
+# Layanan Speech-to-Text (Whisper/speaches, API kompatibel OpenAI)
+STT_BASE_URL = os.getenv("STT_BASE_URL", "http://localhost:8100").rstrip("/")
+STT_API_KEY = _key("STT_API_KEY")
+STT_MODEL = os.getenv("STT_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
 # Isi data demo otomatis saat database masih kosong
 SEED_KALAU_KOSONG = os.getenv("SEED_KALAU_KOSONG", "1") != "0"
 # Izinkan POST /seed (reset data demo). Matikan saat dipakai sungguhan.
@@ -39,6 +46,7 @@ KASUS_NYATA_DIR = DATA_DIR / "kasus_nyata"
 WORK_DIR = DATA_DIR / "work"  # tempat unduhan video & frame sementara
 
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "30"))
+STT_TIMEOUT = float(os.getenv("STT_TIMEOUT", "180"))
 
 
 def llm_aktif() -> bool:
@@ -48,3 +56,10 @@ def llm_aktif() -> bool:
 def search_aktif() -> bool:
     return bool(SERPAPI_KEY)
 
+
+def stt_aktif() -> bool:
+    return bool(STT_BASE_URL)
+
+
+def db_aktif() -> bool:
+    return bool(DATABASE_URL)

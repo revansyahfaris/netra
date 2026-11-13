@@ -25,6 +25,7 @@ backend/
 └── tests/
 dashboard/             Antrean, paket bukti, persetujuan petugas, bukti publik (Farrel)
 docs/                  Kontrak data & skrip demo
+docker/                Container layanan STT (Whisper)                  (Adriel)
 ```
 
 ## Menjalankan backend
@@ -74,6 +75,25 @@ Halaman:
 | `/antrean` | Antrean klaim terurut prioritas, filter status/level, ringkasan angka |
 | `/klaim/{id}` | Kandidat + rincian skor, paket bukti, draf klarifikasi 3 format, persetujuan, audit |
 | `/bukti/{id}` | Halaman bukti publik (tanpa catatan internal), diberi label SIMULASI |
+
+## Menjalankan layanan STT (Docker)
+
+Untuk layanan Speech-to-Text (`faster-whisper` `large-v3-turbo`) via Docker di port `8100` (pastikan Docker Desktop sudah berjalan):
+
+```bash
+cd docker
+docker compose up -d
+# atau untuk mode CPU tanpa GPU NVIDIA:
+# docker compose -f compose.cpu.yaml up -d
+```
+
+Unduh model sekali saja dari terminal/PowerShell mana saja:
+
+```powershell
+curl.exe -X POST "http://localhost:8100/v1/models/deepdml%2Ffaster-whisper-large-v3-turbo-ct2"
+```
+
+Setelah selesai, layanan bisa diakses di `http://localhost:8100/` (tab **Speech-to-Text**) atau API docs di `http://localhost:8100/docs`. Lihat detail lengkap di [docker/README.md](docker/README.md).
 
 ## Endpoint
 
