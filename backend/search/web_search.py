@@ -23,10 +23,15 @@ def _serpapi(params: dict) -> dict:
         raise SearchError("SERPAPI_KEY belum diisi")
     try:
         r = httpx.get(SERPAPI_URL, params={**params, "api_key": config.SERPAPI_KEY}, timeout=config.HTTP_TIMEOUT)
-        r.raise_for_status()
+    except httpx.HTTPError as e:
+        # Jangan pakai str(e): isinya URL lengkap termasuk api_key
+        raise SearchError(type(e).__name__) from None
+    try:
         data = r.json()
-    except (httpx.HTTPError, ValueError) as e:
-        raise SearchError(str(e)) from e
+    except ValueError:
+        raise SearchError(f"HTTP {r.status_code}: respons bukan JSON") from None
+    if r.status_code != 200:
+        raise SearchError(f"HTTP {r.status_code}: {str(data.get('error', ''))[:200]}")
     if "error" in data and not any(k.endswith("results") or k == "visual_matches" for k in data):
         raise SearchError(data["error"])
     return data

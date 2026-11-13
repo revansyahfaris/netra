@@ -30,6 +30,8 @@ from storage import MODE as MODE_PENYIMPANAN
 from storage import Koleksi
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+# httpx mencetak URL lengkap di level INFO (termasuk api_key SerpAPI), jadi dinaikkan ke WARNING
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Penyimpanan: Postgres kalau DATABASE_URL terisi, memori kalau kosong (lihat storage.py)
 KLAIM = Koleksi("klaim", Klaim)

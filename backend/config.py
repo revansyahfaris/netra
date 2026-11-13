@@ -12,14 +12,20 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+def _key(nama: str) -> str:
+    """API key tidak pernah mengandung spasi: buang spasi dan teks tambahan yang ikut tertulis."""
+    nilai = os.getenv(nama, "").strip().strip('"').strip("'")
+    return nilai.split()[0] if nilai else ""
+
+
+GEMINI_API_KEY = _key("GEMINI_API_KEY")
 # Model ringan untuk prioritas & pembuatan query (modul Faris)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 # Model untuk OCR, perbandingan & klarifikasi (modul Adriel). Default sama dengan GEMINI_MODEL.
 GEMINI_MODEL_VERIFIKASI = os.getenv("GEMINI_MODEL_VERIFIKASI", "") or GEMINI_MODEL
-SERPAPI_KEY = os.getenv("SERPAPI_KEY", "")
+SERPAPI_KEY = _key("SERPAPI_KEY")
 # Postgres (Neon). Kosong = simpan di memori.
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+DATABASE_URL = _key("DATABASE_URL")
 
 DATA_DIR = BASE_DIR / "data"
 DUMMY_DIR = DATA_DIR / "dummy"

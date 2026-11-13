@@ -34,15 +34,31 @@ def tanya_json(prompt: str, suhu: float = 0.2, model: str | None = None) -> dict
         "generationConfig": {"temperature": suhu, "responseMimeType": "application/json"},
     }
     try:
+        # Key lewat header, bukan URL, supaya tidak tercetak di log
         r = httpx.post(
             URL.format(model=model or config.GEMINI_MODEL),
-            params={"key": config.GEMINI_API_KEY},
+            headers={"x-goog-api-key": config.GEMINI_API_KEY},
             json=body,
             timeout=config.HTTP_TIMEOUT,
         )
-        r.raise_for_status()
+    except httpx.HTTPError as e:
+        log.warning("Panggilan LLM gagal: %s", type(e).__name__)
+        raise LLMError(type(e).__name__) from None
+    if r.status_code != 200:
+        pesan = f"HTTP {r.status_code}: {_pesan_error(r)}"
+        log.warning("Panggilan LLM gagal: %s", pesan)
+        raise LLMError(pesan)
+    try:
         teks = r.json()["candidates"][0]["content"]["parts"][0]["text"]
         return json.loads(teks)
-    except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError) as e:
-        log.warning("Panggilan LLM gagal: %s", e)
-        raise LLMError(str(e)) from e
+    except (KeyError, IndexError, ValueError) as e:
+        log.warning("Jawaban LLM tidak bisa dibaca: %s", type(e).__name__)
+        raise LLMError("jawaban tidak valid") from None
+
+
+def _pesan_error(r: httpx.Response) -> str:
+    """Ambil pesan error dari respons (tanpa URL, jadi key tidak ikut tercetak)."""
+    try:
+        return str(r.json().get("error", {}).get("message", ""))[:200]
+    except ValueError:
+        return r.reason_phrase
