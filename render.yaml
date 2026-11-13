@@ -1,0 +1,18 @@
+# Deploy ke Render: New + > Blueprint > pilih repo ini.
+# Isi GEMINI_API_KEY dan SERPAPI_KEY di dashboard Render (jangan di file ini).
+services:
+  - type: web
+    name: netra-api
+    runtime: docker
+    rootDir: backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.1-flash-lite
+      - key: GEMINI_MODEL_VERIFIKASI
+        value: gemini-3.8-flash

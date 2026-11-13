@@ -77,3 +77,37 @@ class HasilVerifikasi(BaseModel):
     perubahan: list[JenisPerubahan] = []
     draf_klarifikasi: Optional[DrafKlarifikasi] = None
     perlu_eskalasi: bool = False
+
+
+# ---------- Persetujuan petugas & bukti publik ----------
+
+StatusPersetujuan = Literal["menunggu", "disetujui", "ditolak"]
+
+
+class KeputusanPetugas(BaseModel):
+    """Body dari dashboard saat petugas memutuskan."""
+    keputusan: Literal["disetujui", "ditolak"]
+    petugas: str
+    catatan: Optional[str] = None
+    draf_final: Optional[DrafKlarifikasi] = Field(None, description="Isi kalau petugas mengedit draf; kosong = pakai draf AI")
+
+
+class Persetujuan(BaseModel):
+    claim_id: str
+    status: StatusPersetujuan = "menunggu"
+    petugas: Optional[str] = None
+    catatan: Optional[str] = None
+    draf_final: Optional[DrafKlarifikasi] = None
+    waktu_keputusan: Optional[datetime] = None
+
+
+class BuktiPublik(BaseModel):
+    """Ringkasan yang aman ditampilkan ke publik (hanya untuk klaim yang sudah disetujui)."""
+    claim_id: str
+    teks_klaim: str
+    status: StatusVerifikasi
+    perubahan: list[JenisPerubahan] = []
+    sumber_utama: Optional[HttpUrl] = None
+    sumber_pendukung: list[KandidatSumber] = []
+    klarifikasi: DrafKlarifikasi
+    disetujui_pada: datetime

@@ -20,8 +20,12 @@ class LLMError(Exception):
     pass
 
 
-def tanya_json(prompt: str, suhu: float = 0.2) -> dict | list:
-    """Kirim prompt dan minta jawaban berupa JSON. Melempar LLMError kalau gagal."""
+def tanya_json(prompt: str, suhu: float = 0.2, model: str | None = None) -> dict | list:
+    """Kirim prompt dan minta jawaban berupa JSON. Melempar LLMError kalau gagal.
+
+    model: kosongkan untuk model ringan (config.GEMINI_MODEL),
+           atau isi config.GEMINI_MODEL_VERIFIKASI untuk tahap verifikasi.
+    """
     if not config.llm_aktif():
         raise LLMError("GEMINI_API_KEY belum diisi")
 
@@ -31,7 +35,7 @@ def tanya_json(prompt: str, suhu: float = 0.2) -> dict | list:
     }
     try:
         r = httpx.post(
-            URL.format(model=config.GEMINI_MODEL),
+            URL.format(model=model or config.GEMINI_MODEL),
             params={"key": config.GEMINI_API_KEY},
             json=body,
             timeout=config.HTTP_TIMEOUT,

@@ -51,6 +51,10 @@ data contoh di `data/dummy/kandidat.json`. Isi `GEMINI_API_KEY` dan `SERPAPI_KEY
 | `GET /cari/{id}/proses` | Query yang dipakai & rincian skor tiap kandidat |
 | `POST /verifikasi/{id}` | Bandingkan konten viral vs sumber, buat draf klarifikasi |
 | `POST /pipeline/{id}` | Cari + verifikasi sekaligus (untuk demo) |
+| `GET /persetujuan` | Antrean klaim yang menunggu keputusan petugas (`?status=semua` untuk semua) |
+| `POST /persetujuan/{id}` | Petugas menyetujui/menolak, boleh mengedit draf lewat `draf_final` |
+| `GET /bukti` · `GET /bukti/{id}` | Bukti publik (hanya klaim yang disetujui) |
+| `GET /bukti/{id}/halaman` | Halaman bukti publik siap dibagikan |
 
 ## Cara kerja
 
@@ -69,6 +73,22 @@ cadangannya daftar kata kunci. Level: tinggi ≥ 0.65, sedang ≥ 0.4.
 
 Kalau sumber tertua pun terindikasi dimanipulasi atau tidak ada sumber pendukung,
 status keluarannya `belum_bisa_diverifikasi` / `tidak_ditemukan` dan dieskalasi ke petugas.
+
+## Model LLM
+
+`GEMINI_MODEL` dipakai untuk tugas ringan (klasifikasi prioritas, pembuatan query).
+`GEMINI_MODEL_VERIFIKASI` untuk OCR, perbandingan, dan klarifikasi:
+`llm.tanya_json(prompt, model=config.GEMINI_MODEL_VERIFIKASI)`.
+
+## Deploy (Render)
+
+1. Push repo ke GitHub.
+2. Di Render: **New + → Blueprint**, pilih repo ini (memakai `render.yaml` dan `backend/Dockerfile`).
+3. Isi `GEMINI_API_KEY` dan `SERPAPI_KEY` di tab Environment.
+4. Cek `https://<nama-service>.onrender.com/health`.
+
+Paket gratis Render tidur setelah tidak dipakai, jadi buka `/health` sebelum demo supaya server bangun.
+Data masih disimpan di memori: setiap restart kembali ke data demo.
 
 ## Tes
 
