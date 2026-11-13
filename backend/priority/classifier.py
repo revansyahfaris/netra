@@ -20,10 +20,11 @@ SENSITIVITAS_TOPIK = {
 }
 
 KATA_KUNCI = {
-    "pimpinan": ["kasad", "panglima", "pangdam", "danrem", "dandim", "jenderal", "wakasad", "pangkostrad"],
-    "operasi": ["papua", "kkb", "operasi", "bentrok", "tembak", "bubarkan", "membubarkan", "pukul", "aniaya", "senjata"],
+    "pimpinan": ["kasad", "panglima", "pangdam", "danrem", "dandim", "jenderal", "wakasad", "pangkostrad", "kapuspen", "kapendam", "kasdam"],
+    "operasi": ["papua", "kkb", "operasi", "bentrok", "tembak", "bubarkan", "membubarkan", "pukul", "aniaya", "senjata",
+                "intan jaya", "nduga", "yahukimo", "puncak jaya", "mendobrak", "dobrak", "mencuri", "menjarah"],
     "sara": ["agama", "suku", "ras", "kafir", "pribumi", "aseng", "etnis"],
-    "keselamatan": ["bom", "ledakan", "bencana", "gempa", "evakuasi", "ancaman", "darurat"],
+    "keselamatan": ["bom", "ledakan", "bencana", "gempa", "evakuasi", "ancaman", "darurat", "perang", "tank", "invasi", "serang"],
 }
 
 PROMPT = """Kamu analis Dinas Penerangan TNI AD. Klasifikasikan klaim viral berikut.

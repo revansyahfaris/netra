@@ -13,7 +13,7 @@ import html
 import json
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +47,9 @@ def muat_dummy():
         for item in json.loads(f.read_text(encoding="utf-8")):
             if item["claim_id"] in KLAIM:   # jangan timpa data yang sudah ada di database
                 continue
+            if "umur_jam" in item:   # kasus demo diputar ulang seolah baru ditemukan sekian jam lalu
+                umur = item.pop("umur_jam")
+                item["tanggal_ditemukan"] = (datetime.now(timezone.utc) - timedelta(hours=umur)).isoformat()
             k = hitung_prioritas(Klaim(**item))
             KLAIM[k.claim_id] = k
 
