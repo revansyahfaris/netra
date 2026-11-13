@@ -18,6 +18,14 @@ class SearchError(Exception):
     pass
 
 
+def _url_layak(url: str | None) -> bool:
+    """Buang tautan redirect/internal mesin pencari (mis. google.com/goto, /url?q=) yang bukan sumber."""
+    if not url or not url.startswith("http"):
+        return False
+    host = sources.domain(url)
+    return not (host in {"google.com", "google.co.id", "googleusercontent.com"} or host.endswith(".google.com"))
+
+
 def _serpapi(params: dict) -> dict:
     if not config.search_aktif():
         raise SearchError("SERPAPI_KEY belum diisi")
@@ -43,7 +51,7 @@ def cari_google(query: str, kutipan: bool = False, jumlah: int = 8) -> list[Temu
     hasil = []
     for item in data.get("organic_results", [])[:jumlah]:
         url = item.get("link")
-        if not url:
+        if not _url_layak(url):
             continue
         judul, snippet = item.get("title", ""), item.get("snippet", "")
         hasil.append(
@@ -66,7 +74,7 @@ def cari_youtube(query: str, jumlah: int = 5) -> list[Temuan]:
     hasil = []
     for item in data.get("video_results", [])[:jumlah]:
         url = item.get("link")
-        if not url:
+        if not _url_layak(url):
             continue
         kanal = (item.get("channel") or {}).get("name")
         judul = item.get("title", "")
@@ -91,7 +99,7 @@ def reverse_image(image_url: str, jumlah: int = 8) -> list[Temuan]:
     hasil = []
     for i, item in enumerate(data.get("visual_matches", [])[:jumlah]):
         url = item.get("link")
-        if not url:
+        if not _url_layak(url):
             continue
         hasil.append(
             Temuan(
