@@ -5,81 +5,81 @@ Jalankan dari folder backend:
 Lalu buka http://localhost:8000/docs
 
 Alur: POST /prioritas -> GET /antrean -> POST /cari/{id} -> POST /verifikasi/{id}
-      -> GET /persetujuan -> POST /persetujuan/{id} -> GET /bukti/{id}
+      -> PATCH /verifikasi/{id}/persetujuan -> GET /bukti/{id}
 Atau sekaligus: POST /pipeline/{id}
 """
 
-import html
-import json
 import logging
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 import config
+from store.db import mode as db_mode
 from priority import hitung_prioritas
 from schemas import (
-    BuktiPublik, DrafKlarifikasi, HasilPencarian, HasilVerifikasi, KeputusanPetugas, Klaim, Persetujuan,
+    Bukti,
+    DrafKlarifikasi,
+    HasilPencarian,
+    HasilVerifikasi,
+    Klaim,
+    KlaimLengkap,
+    PermintaanPersetujuan,
 )
 from search import cari_sumber
-from storage import MODE as MODE_PENYIMPANAN
-from storage import Koleksi
+from store import (
+    Repo,
+    TidakBoleh,
+    TidakDitemukan,
+    get_repo,
+    seed_kalau_kosong,
+    seed_ulang,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 # httpx mencetak URL lengkap di level INFO (termasuk api_key SerpAPI), jadi dinaikkan ke WARNING
 logging.getLogger("httpx").setLevel(logging.WARNING)
+log = logging.getLogger("netra.api")
 
-# Penyimpanan: Postgres kalau DATABASE_URL terisi, memori kalau kosong (lihat storage.py)
-KLAIM = Koleksi("klaim", Klaim)
-PENCARIAN = Koleksi("pencarian", HasilPencarian)
-PROSES_PENCARIAN = Koleksi("proses_pencarian")
-VERIFIKASI = Koleksi("verifikasi", HasilVerifikasi)
-PERSETUJUAN = Koleksi("persetujuan", Persetujuan)
-
-
-def muat_dummy():
-    f = config.DUMMY_DIR / "klaim.json"
-    if f.exists():
-        for item in json.loads(f.read_text(encoding="utf-8")):
-            if item["claim_id"] in KLAIM:   # jangan timpa data yang sudah ada di database
-                continue
-            if "umur_jam" in item:   # kasus demo diputar ulang seolah baru ditemukan sekian jam lalu
-                umur = item.pop("umur_jam")
-                item["tanggal_ditemukan"] = (datetime.now(timezone.utc) - timedelta(hours=umur)).isoformat()
-            k = hitung_prioritas(Klaim(**item))
-            KLAIM[k.claim_id] = k
+REPO: Repo = get_repo()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    muat_dummy()
+    from store import init_db
+
+    init_db()
+    if config.SEED_KALAU_KOSONG:
+        seed_kalau_kosong(REPO)
+    log.info("Netra siap. Klaim di database: %d", len(REPO.daftar_klaim()))
     yield
 
 
-app = FastAPI(title="Netra API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Netra API", version="0.3.0", lifespan=lifespan)
 
 # Supaya dashboard (beda port/domain) bisa memanggil API ini
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
 def _ambil_klaim(claim_id: str) -> Klaim:
-    if claim_id not in KLAIM:
+    k = REPO.ambil_klaim(claim_id)
+    if k is None:
         raise HTTPException(404, "Klaim tidak ditemukan")
-    return KLAIM[claim_id]
+    return k
 
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "jumlah_klaim": len(KLAIM),
+        "jumlah_klaim": len(REPO.daftar_klaim()),
         "llm": "aktif" if config.llm_aktif() else "fallback keyword",
         "pencarian": "live" if config.search_aktif() else "demo",
-        "penyimpanan": MODE_PENYIMPANAN,
+        "database": db_mode(),
     }
 
 
@@ -89,18 +89,24 @@ def health():
 def tambah_klaim(klaim: Klaim):
     """Terima klaim dari sistem deteksi, beri skor prioritas, masukkan ke antrean."""
     k = hitung_prioritas(klaim)
-    KLAIM[k.claim_id] = k
-    return k
+    return REPO.simpan_klaim(k, aktor="api")
 
 
-@app.get("/antrean", response_model=list[Klaim], tags=["prioritas"])
-def antrean():
-    return sorted(KLAIM.values(), key=lambda k: k.skor_prioritas or 0, reverse=True)
+@app.get("/antrean", response_model=list[KlaimLengkap], tags=["prioritas"])
+def antrean(
+    status: str | None = Query(None, description="Filter status_pipeline"),
+    level: str | None = Query(None, description="tinggi / sedang / rendah"),
+):
+    """Klaim terurut dari prioritas tertinggi, lengkap dengan status verifikasi."""
+    return REPO.daftar_lengkap(status=status, level=level)
 
 
-@app.get("/klaim/{claim_id}", response_model=Klaim, tags=["prioritas"])
+@app.get("/klaim/{claim_id}", response_model=KlaimLengkap, tags=["prioritas"])
 def detail_klaim(claim_id: str):
-    return _ambil_klaim(claim_id)
+    hasil = REPO.ambil_lengkap(claim_id)
+    if hasil is None:
+        raise HTTPException(404, "Klaim tidak ditemukan")
+    return hasil
 
 
 # ---------- Pencarian sumber (Faris) ----------
@@ -114,70 +120,166 @@ def cari(claim_id: str, req: PermintaanCari | None = None):
     """Cari kandidat sumber asli, lalu urutkan dari yang paling mungkin asli."""
     k = _ambil_klaim(claim_id)
     hasil, proses = cari_sumber(k, (req.url_manual if req else []))
-    PENCARIAN[claim_id] = hasil
-    PROSES_PENCARIAN[claim_id] = proses
-    return hasil
+    hasil = hasil.model_copy(update={"mode": proses.get("mode", "demo")})
+    return REPO.simpan_pencarian(hasil, proses, aktor="api")
 
 
 @app.get("/cari/{claim_id}", response_model=HasilPencarian, tags=["pencarian"])
 def ambil_pencarian(claim_id: str):
-    if claim_id not in PENCARIAN:
+    hasil = REPO.ambil_pencarian(claim_id)
+    if hasil is None:
         raise HTTPException(404, "Belum dicari")
-    return PENCARIAN[claim_id]
+    return hasil[0]
 
 
 @app.get("/cari/{claim_id}/proses", tags=["pencarian"])
 def proses_pencarian(claim_id: str):
     """Rincian proses: mode, query yang dipakai, video yang dicocokkan, rincian skor tiap kandidat."""
-    if claim_id not in PROSES_PENCARIAN:
+    hasil = REPO.ambil_pencarian(claim_id)
+    if hasil is None:
         raise HTTPException(404, "Belum dicari")
-    return PROSES_PENCARIAN[claim_id]
+    return hasil[1]
 
 
 # ---------- Verifikasi & klarifikasi (Adriel) ----------
 
 def jalankan_verifikasi(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifikasi:
-    """TODO (Adriel): ganti dengan RAG + OCR/transkrip + perbandingan LLM.
-    Input: klaim + kandidat terurut. Output: HasilVerifikasi.
-    Panggil LLM dengan llm.tanya_json(prompt, model=config.GEMINI_MODEL_VERIFIKASI)."""
-    if not pencarian.kandidat:
-        return HasilVerifikasi(claim_id=klaim.claim_id, status="tidak_ditemukan", perlu_eskalasi=True)
-    utama = pencarian.kandidat[0]
+    """TODO(Adriel): ganti dengan RAG + OCR/transkrip + perbandingan LLM.
+
+    Versi sementara ini deterministik supaya dashboard bisa diuji end-to-end:
+    - tanpa kandidat                  -> tidak_ditemukan
+    - semua kandidat pribadi/watermark -> belum_bisa_diverifikasi (eskalasi)
+    - ada kandidat bersih             -> terbukti_diubah + bukti metadata
+    """
+    mulai = time.perf_counter()
+    kandidat = pencarian.kandidat
+    if not kandidat:
+        return HasilVerifikasi(
+            claim_id=klaim.claim_id,
+            status="tidak_ditemukan",
+            ringkasan="Tidak ada sumber pendukung yang ditemukan untuk klaim ini.",
+            perlu_eskalasi=True,
+            metode=["manual"],
+            waktu_proses_detik=round(time.perf_counter() - mulai, 3),
+        )
+
+    bersih = [k for k in kandidat if k.jenis_sumber != "pribadi" and not k.ada_watermark]
+    if not bersih:
+        return HasilVerifikasi(
+            claim_id=klaim.claim_id,
+            status="belum_bisa_diverifikasi",
+            sumber_utama=kandidat[0].url,
+            ringkasan=(
+                "Kandidat sumber ditemukan, tetapi yang tertua pun berasal dari akun pribadi "
+                "dan/atau berwatermark. Tidak ada sumber yang bisa dianggap otentik."
+            ),
+            bukti=[
+                Bukti(
+                    jenis="metadata",
+                    url=k.url,
+                    cuplikan=k.cuplikan,
+                    teks_sumber=k.judul or None,
+                    catatan=(
+                        f"Kandidat skor {k.skor or 0:.2f}, diunggah "
+                        f"{k.tanggal_unggah:%d %b %Y} oleh sumber {k.jenis_sumber}"
+                        + (" dan berwatermark" if k.ada_watermark else "")
+                    ),
+                )
+                for k in kandidat
+            ],
+            perlu_eskalasi=True,
+            metode=["frame_match"],
+            waktu_proses_detik=round(time.perf_counter() - mulai, 3),
+        )
+
+    utama = bersih[0]
+    perubahan = []
+    if utama.tanggal_unggah and utama.tanggal_unggah.year < klaim.tanggal_ditemukan.year:
+        perubahan.append("tanggal_berbeda")
+    if utama.cuplikan and ":" in str(utama.cuplikan):
+        perubahan.append("dipotong")
+    if not perubahan:
+        perubahan.append("konteks_berbeda")
+
+    bukti = [
+        Bukti(
+            jenis="metadata",
+            url=utama.url,
+            cuplikan=utama.cuplikan,
+            teks_sumber=utama.judul or None,
+            catatan=(
+                f"Kandidat peringkat 1 (skor {utama.skor or 0:.2f}), "
+                f"diunggah {utama.tanggal_unggah:%d %b %Y}" if utama.tanggal_unggah else "Kandidat peringkat 1"
+            ),
+        )
+    ]
+    if klaim.media_url:
+        bukti.append(Bukti(
+            jenis="frame" if klaim.jenis_media == "video" else "kutipan",
+            url=klaim.media_url,
+            cuplikan=utama.cuplikan,
+            teks_viral=klaim.teks_klaim,
+            teks_sumber=utama.judul or None,
+            catatan="Perbandingan konten viral dengan kandidat sumber asli.",
+        ))
+
     return HasilVerifikasi(
         claim_id=klaim.claim_id,
         status="terbukti_diubah",
         sumber_utama=utama.url,
-        perubahan=["tanggal_berbeda", "konteks_berbeda"],
+        perubahan=perubahan,
+        ringkasan=(
+            f"Konten yang beredar cocok dengan sumber yang lebih awal "
+            f"({utama.tanggal_unggah:%d %b %Y})." if utama.tanggal_unggah
+            else "Konten yang beredar cocok dengan sumber yang lebih awal."
+        ),
+        bukti=bukti,
+        keyakinan=utama.skor,
+        metode=["frame_match"] if klaim.jenis_media == "video" else ["rag"],
         draf_klarifikasi=DrafKlarifikasi(
-            kartu="[CONTOH] Konten ini bukan kejadian terbaru.",
-            pendek="[CONTOH] Konten lama diunggah ulang dengan narasi baru.",
-            whatsapp=f"[CONTOH] Cek fakta: konten yang beredar berasal dari {utama.url}",
+            kartu="Konten ini bukan kejadian baru. Sumber asli lebih awal dan konteksnya berbeda.",
+            pendek="Video/klaim ini sudah pernah beredar sebelumnya dengan konteks berbeda.",
+            whatsapp=(
+                "Cek fakta: konten yang beredar berasal dari "
+                f"{utama.url} yang diunggah {utama.tanggal_unggah:%d/%m/%Y}. "
+                "Narasi yang beredar tidak sesuai dengan konteks aslinya."
+                if utama.tanggal_unggah else
+                f"Cek fakta: konten yang beredar berasal dari {utama.url}."
+            ),
         ),
         perlu_eskalasi=False,
+        waktu_proses_detik=round(time.perf_counter() - mulai, 3),
     )
-
-
-def simpan_verifikasi(hasil: HasilVerifikasi):
-    """Simpan hasil verifikasi dan masukkan ke antrean persetujuan (keputusan lama direset)."""
-    VERIFIKASI[hasil.claim_id] = hasil
-    PERSETUJUAN[hasil.claim_id] = Persetujuan(claim_id=hasil.claim_id)
 
 
 @app.post("/verifikasi/{claim_id}", response_model=HasilVerifikasi, tags=["verifikasi"])
 def verifikasi(claim_id: str):
     k = _ambil_klaim(claim_id)
-    if claim_id not in PENCARIAN:
+    if REPO.ambil_pencarian(claim_id) is None:
         raise HTTPException(400, "Jalankan /cari dulu untuk klaim ini")
-    hasil = jalankan_verifikasi(k, PENCARIAN[claim_id])
-    simpan_verifikasi(hasil)
-    return hasil
+    pencarian = REPO.ambil_pencarian(claim_id)[0]
+    hasil = jalankan_verifikasi(k, pencarian)
+    return REPO.simpan_verifikasi(hasil, aktor="api")
 
 
 @app.get("/verifikasi/{claim_id}", response_model=HasilVerifikasi, tags=["verifikasi"])
 def ambil_verifikasi(claim_id: str):
-    if claim_id not in VERIFIKASI:
+    hasil = REPO.ambil_verifikasi(claim_id)
+    if hasil is None:
         raise HTTPException(404, "Belum diverifikasi")
-    return VERIFIKASI[claim_id]
+    return hasil
+
+
+@app.patch("/verifikasi/{claim_id}/persetujuan", response_model=HasilVerifikasi, tags=["persetujuan"])
+def putuskan(claim_id: str, req: PermintaanPersetujuan):
+    """Petugas menyetujui atau menolak draf klarifikasi."""
+    _ambil_klaim(claim_id)
+    try:
+        return REPO.setujui(claim_id, req.keputusan, req.petugas, req.catatan)
+    except TidakDitemukan as e:
+        raise HTTPException(404, str(e))
+    except TidakBoleh as e:
+        raise HTTPException(409, str(e))
 
 
 # ---------- Pipeline sekaligus ----------
@@ -194,115 +296,49 @@ def pipeline(claim_id: str, req: PermintaanCari | None = None):
     k = _ambil_klaim(claim_id)
     pencarian = cari(claim_id, req)
     hasil = jalankan_verifikasi(k, pencarian)
-    simpan_verifikasi(hasil)
-    return HasilPipeline(klaim=k, pencarian=pencarian, verifikasi=hasil)
+    return HasilPipeline(klaim=k, pencarian=pencarian, verifikasi=REPO.simpan_verifikasi(hasil, aktor="api"))
 
 
-# ---------- Persetujuan petugas ----------
+# ---------- Bukti publik & statistik ----------
 
-class ItemPersetujuan(BaseModel):
-    klaim: Klaim
-    verifikasi: HasilVerifikasi
-    persetujuan: Persetujuan
-
-
-@app.get("/persetujuan", response_model=list[ItemPersetujuan], tags=["persetujuan"])
-def antrean_persetujuan(status: str = "menunggu"):
-    """Daftar klaim yang sudah diverifikasi. Filter status: menunggu / disetujui / ditolak / semua.
-    Klaim yang perlu eskalasi dan berprioritas tinggi tampil paling atas."""
-    item = [
-        ItemPersetujuan(klaim=KLAIM[cid], verifikasi=VERIFIKASI[cid], persetujuan=p)
-        for cid, p in PERSETUJUAN.items()
-        if cid in KLAIM and cid in VERIFIKASI and (status == "semua" or p.status == status)
-    ]
-    return sorted(item, key=lambda i: (not i.verifikasi.perlu_eskalasi, -(i.klaim.skor_prioritas or 0)))
-
-
-@app.post("/persetujuan/{claim_id}", response_model=Persetujuan, tags=["persetujuan"])
-def putuskan(claim_id: str, keputusan: KeputusanPetugas):
-    """Petugas menyetujui atau menolak. Draf boleh diedit lewat draf_final."""
-    if claim_id not in VERIFIKASI:
-        raise HTTPException(400, "Klaim belum diverifikasi")
-    v = VERIFIKASI[claim_id]
-    draf = keputusan.draf_final or v.draf_klarifikasi
-    if keputusan.keputusan == "disetujui" and draf is None:
-        raise HTTPException(400, "Tidak ada draf klarifikasi; isi draf_final sebelum menyetujui")
-    p = Persetujuan(
-        claim_id=claim_id,
-        status=keputusan.keputusan,
-        petugas=keputusan.petugas,
-        catatan=keputusan.catatan,
-        draf_final=draf if keputusan.keputusan == "disetujui" else None,
-        waktu_keputusan=datetime.now(timezone.utc),
-    )
-    PERSETUJUAN[claim_id] = p
-    return p
+@app.get("/bukti/{claim_id}", tags=["publik"])
+def bukti_publik(claim_id: str):
+    """Proyeksi publik: tanpa catatan internal petugas dan tanpa audit trail."""
+    lengkap = REPO.ambil_lengkap(claim_id)
+    if lengkap is None:
+        raise HTTPException(404, "Klaim tidak ditemukan")
+    v = lengkap.verifikasi
+    disetujui = bool(v and v.status_persetujuan == "disetujui")
+    return {
+        "claim_id": lengkap.klaim.claim_id,
+        "teks_klaim": lengkap.klaim.teks_klaim,
+        "jenis_media": lengkap.klaim.jenis_media,
+        "media_url": lengkap.klaim.media_url,
+        "tanggal_ditemukan": lengkap.klaim.tanggal_ditemukan,
+        "status": v.status if v else None,
+        "ringkasan": v.ringkasan if v else None,
+        "perubahan": v.perubahan if v else [],
+        "keyakinan": v.keyakinan if v else None,
+        "metode": v.metode if v else [],
+        "sumber_utama": v.sumber_utama if v else None,
+        "bukti": [b.model_dump(mode="json") for b in (v.bukti if v else [])],
+        "klarifikasi": v.draf_klarifikasi.model_dump() if (v and disetujui and v.draf_klarifikasi) else None,
+        "disetujui": disetujui,
+        "waktu_verifikasi": v.waktu_verifikasi if v else None,
+        "waktu_persetujuan": v.waktu_persetujuan if v else None,
+        "simulasi": True,
+    }
 
 
-# ---------- Bukti publik ----------
-
-def _bukti(claim_id: str) -> BuktiPublik:
-    p = PERSETUJUAN.get(claim_id)
-    if not p or p.status != "disetujui":
-        raise HTTPException(404, "Bukti belum dipublikasikan")
-    k, v = KLAIM[claim_id], VERIFIKASI[claim_id]
-    pendukung = PENCARIAN[claim_id].kandidat[:3] if claim_id in PENCARIAN else []
-    return BuktiPublik(
-        claim_id=claim_id, teks_klaim=k.teks_klaim, status=v.status, perubahan=v.perubahan,
-        sumber_utama=v.sumber_utama, sumber_pendukung=pendukung,
-        klarifikasi=p.draf_final, disetujui_pada=p.waktu_keputusan,
-    )
+@app.get("/statistik", tags=["publik"])
+def statistik():
+    return REPO.statistik()
 
 
-@app.get("/bukti", response_model=list[BuktiPublik], tags=["bukti publik"])
-def daftar_bukti():
-    return [_bukti(cid) for cid, p in PERSETUJUAN.items() if p.status == "disetujui"]
-
-
-@app.get("/bukti/{claim_id}", response_model=BuktiPublik, tags=["bukti publik"])
-def bukti(claim_id: str):
-    return _bukti(claim_id)
-
-
-LABEL_STATUS = {
-    "terbukti_diubah": "Terbukti diubah",
-    "tidak_ditemukan": "Sumber pendukung tidak ditemukan",
-    "belum_bisa_diverifikasi": "Belum bisa diverifikasi",
-}
-LABEL_PERUBAHAN = {
-    "dipotong": "Dipotong", "tanggal_berbeda": "Tanggal berbeda", "kutipan_tidak_ada": "Kutipan tidak ada di sumber asli",
-    "konteks_berbeda": "Konteks berbeda", "lainnya": "Lainnya",
-}
-
-
-@app.get("/bukti/{claim_id}/halaman", response_class=HTMLResponse, tags=["bukti publik"])
-def halaman_bukti(claim_id: str):
-    """Halaman bukti publik siap dibagikan (tanpa perlu dashboard)."""
-    b = _bukti(claim_id)
-    e = html.escape
-    perubahan = "".join(f"<li>{e(LABEL_PERUBAHAN.get(x, x))}</li>" for x in b.perubahan) or "<li>-</li>"
-    sumber = "".join(
-        f'<li><a href="{e(str(s.url))}" target="_blank" rel="noopener">{e(str(s.url))}</a>'
-        f'<span>{e(s.jenis_sumber)} · {s.tanggal_unggah.date() if s.tanggal_unggah else "tanggal tidak diketahui"}'
-        f'{" · menit " + e(s.cuplikan) if s.cuplikan and s.metode == "frame_match" else ""}</span></li>'
-        for s in b.sumber_pendukung
-    )
-    return f"""<!DOCTYPE html>
-<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Cek Fakta Netra · {e(b.claim_id)}</title>
-<style>
-body{{font-family:system-ui,sans-serif;max-width:680px;margin:0 auto;padding:24px 16px;color:#1c1c1c;line-height:1.6}}
-.tag{{display:inline-block;padding:2px 10px;border-radius:999px;background:#fdecea;color:#8a1c12;font-size:14px}}
-.klaim{{border-left:3px solid #c9c9c9;padding:4px 12px;color:#555}}
-.kartu{{background:#f3f6f4;border-radius:12px;padding:16px;margin:16px 0}}
-li span{{display:block;color:#666;font-size:13px}} a{{color:#0b5c3b;word-break:break-all}}
-footer{{color:#888;font-size:13px;margin-top:32px}}
-</style></head><body>
-<p class="tag">{e(LABEL_STATUS.get(b.status, b.status))}</p>
-<h1>Cek fakta</h1>
-<p class="klaim">{e(b.teks_klaim)}</p>
-<div class="kartu"><strong>{e(b.klarifikasi.kartu)}</strong><p>{e(b.klarifikasi.pendek)}</p></div>
-<h2>Apa yang diubah</h2><ul>{perubahan}</ul>
-<h2>Sumber</h2><ul>{sumber or "<li>-</li>"}</ul>
-<footer>Diverifikasi dengan Netra dan disetujui petugas pada {b.disetujui_pada:%d %b %Y %H.%M} UTC.</footer>
-</body></html>"""
+@app.post("/seed", tags=["dev"])
+def seed():
+    """Reset data demo (dev). Matikan lewat IZINKAN_SEED=0."""
+    if not config.IZINKAN_SEED:
+        raise HTTPException(403, "Seed dimatikan")
+    jumlah = seed_ulang(REPO)
+    return {"dimuat": jumlah, "waktu": datetime.now().isoformat()}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Netra">
+  <rect width="64" height="64" rx="12" fill="#101f42" />
+  <path d="M18 46V18h6l16 19V18h6v28h-6L24 27v19z" fill="#ffffff" />
+  <circle cx="47" cy="44" r="4" fill="#7aa2ff" />
+</svg>

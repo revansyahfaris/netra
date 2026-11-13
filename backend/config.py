@@ -24,11 +24,18 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 # Model untuk OCR, perbandingan & klarifikasi (modul Adriel). Default sama dengan GEMINI_MODEL.
 GEMINI_MODEL_VERIFIKASI = os.getenv("GEMINI_MODEL_VERIFIKASI", "") or GEMINI_MODEL
 SERPAPI_KEY = _key("SERPAPI_KEY")
-# Postgres (Neon). Kosong = simpan di memori.
+# Postgres (Neon). Kosongkan untuk memakai SQLite lokal (backend/data/netra.db)
 DATABASE_URL = _key("DATABASE_URL")
+# Isi data demo otomatis saat database masih kosong
+SEED_KALAU_KOSONG = os.getenv("SEED_KALAU_KOSONG", "1") != "0"
+# Izinkan POST /seed (reset data demo). Matikan saat dipakai sungguhan.
+IZINKAN_SEED = os.getenv("IZINKAN_SEED", "1") != "0"
+# Ikut muat kasus nyata (data/kasus_nyata) saat seed. Menyebut peristiwa & pejabat nyata.
+DEMO_KASUS_NYATA = os.getenv("DEMO_KASUS_NYATA", "0") == "1"
 
 DATA_DIR = BASE_DIR / "data"
 DUMMY_DIR = DATA_DIR / "dummy"
+KASUS_NYATA_DIR = DATA_DIR / "kasus_nyata"
 WORK_DIR = DATA_DIR / "work"  # tempat unduhan video & frame sementara
 
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "30"))
@@ -41,5 +48,3 @@ def llm_aktif() -> bool:
 def search_aktif() -> bool:
     return bool(SERPAPI_KEY)
 
-# Awalan nama tabel milik backend, supaya tidak bentrok dengan tabel lain di database yang sama
-TABLE_PREFIX = os.getenv("TABLE_PREFIX", "netra_api_")

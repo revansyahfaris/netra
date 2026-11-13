@@ -18,10 +18,10 @@ DOMAIN_VIDEO = ("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com
 
 def _demo(klaim: Klaim) -> list[Temuan] | None:
     """Data kandidat contoh untuk klaim demo (dipakai kalau SERPAPI_KEY kosong)."""
-    f = config.DUMMY_DIR / "kandidat.json"
-    if not f.exists():
-        return None
-    data = json.loads(f.read_text(encoding="utf-8")).get(klaim.claim_id)
+    data = None
+    for f in (config.DUMMY_DIR / "kandidat.json", config.KASUS_NYATA_DIR / "kandidat.json"):
+        if f.exists():
+            data = json.loads(f.read_text(encoding="utf-8")).get(klaim.claim_id) or data
     if not data:
         return None
     from . import dates

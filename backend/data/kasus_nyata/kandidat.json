@@ -1,0 +1,36 @@
+{
+  "_catatan": "Kasus nyata (sudah diklarifikasi resmi) untuk demo alternatif. Aktif bila DEMO_KASUS_NYATA=1. Menyebut nama pejabat & peristiwa nyata: sepakati tim sebelum dipakai di video.",
+  "r001": [
+    {
+      "url": "https://rri.co.id/nabire/hukum/kriminalitas/2599930/rekaman-2021-bukan-bukti-kasus-terkini-koops-habema-luruskan-fakta-video-beredar",
+      "metode": "keyword",
+      "kemiripan": 0.85,
+      "jenis_sumber": "media",
+      "judul": "Rekaman 2021 Bukan Bukti Kasus Terkini, Koops Habema Luruskan Fakta Video Beredar",
+      "tanggal_unggah": "2026-07-29",
+      "cuplikan": "Video tersebut merupakan rekaman kegiatan personel Satgas Yonif 501/BY pada tahun 2021 saat pengecekan dan pengamanan di lingkungan Kantor Bupati Intan Jaya."
+    }
+  ],
+  "r002": [
+    {
+      "url": "https://www.merahputih.com/post/read/hoaks-atau-fakta-mahasiswa-bisa-minta-bantuan-ke-kodam-jika-ingin-demo",
+      "metode": "kutipan",
+      "kemiripan": 0.75,
+      "jenis_sumber": "media",
+      "judul": "[HOAKS atau FAKTA]: Mahasiswa Bisa Minta Bantuan ke Kodam jika Ingin Demo",
+      "tanggal_unggah": "2020-06-30",
+      "cuplikan": "Pernyataan Sisriadi pernah dimuat CNN Indonesia 26 September 2019: pengawalan demonstrasi adalah kewenangan Polri, TNI membantu jika tenaga polisi tidak cukup."
+    }
+  ],
+  "r003": [
+    {
+      "url": "https://www.kompas.com/cekfakta/read/2023/09/20/194500982/-hoaks-video-persiapan-perang-tni-di-kepulauan-riau",
+      "metode": "keyword",
+      "kemiripan": 0.8,
+      "jenis_sumber": "media",
+      "judul": "[HOAKS] Video Persiapan Perang TNI di Kepulauan Riau",
+      "tanggal_unggah": "2023-09-20",
+      "cuplikan": "Video dengan klaim persiapan perang TNI di Kepulauan Riau merupakan konten lama."
+    }
+  ]
+}

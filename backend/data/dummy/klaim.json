@@ -1,32 +1,55 @@
 [
   {
     "claim_id": "c001",
-    "teks_klaim": "Video aparat TNI mendobrak pintu dan mengambil komputer di Kantor Bupati Intan Jaya, disebut terjadi pada 23 Juli 2026",
+    "teks_klaim": "Video prajurit TNI AD membubarkan warga di Papua, disebut terjadi minggu ini",
+    "media_url": "https://example.com/viral/video-c001.mp4",
     "jenis_media": "video",
-    "jumlah_share": 9800,
-    "jumlah_view": 410000,
-    "laju_sebar": 1100,
-    "pengikut_pengunggah": 250000,
-    "umur_jam": 3
+    "tanggal_ditemukan": "2026-11-11T08:00:00+07:00",
+    "jumlah_share": 12400,
+    "jumlah_view": 380000,
+    "laju_sebar": 950,
+    "pengikut_pengunggah": 45000
   },
   {
     "claim_id": "c002",
-    "teks_klaim": "Maklumat Kapuspen TNI Mayjen Sisriadi: mahasiswa bisa minta pendampingan Kodam saat demo karena kewenangan bukan lagi di tangan Panglima TNI",
+    "teks_klaim": "Kasad disebut menyatakan 'TNI siap ambil alih pemerintahan sipil'",
+    "media_url": "https://example.com/viral/gambar-c002.jpg",
     "jenis_media": "gambar",
-    "jumlah_share": 4200,
-    "jumlah_view": 95000,
-    "laju_sebar": 380,
-    "pengikut_pengunggah": 12000,
-    "umur_jam": 6
+    "tanggal_ditemukan": "2026-11-11T09:30:00+07:00",
+    "jumlah_share": 8700,
+    "jumlah_view": 150000,
+    "laju_sebar": 1200,
+    "pengikut_pengunggah": 3200
+  },
+  {
+    "claim_id": "c001b",
+    "teks_klaim": "Video pengamanan disebut baru terjadi pekan ini, beredar tanpa menyebut lokasi",
+    "media_url": "https://example.com/viral/video-c001b.mp4",
+    "jenis_media": "video",
+    "tanggal_ditemukan": "2026-11-12T07:00:00+07:00",
+    "jumlah_share": 5600,
+    "jumlah_view": 190000,
+    "laju_sebar": 420,
+    "pengikut_pengunggah": 21000
+  },
+  {
+    "claim_id": "c004",
+    "teks_klaim": "Disebut ada pengumuman resmi TNI AD tentang pembagian sembako di markas, tanpa sumber",
+    "jenis_media": "teks",
+    "tanggal_ditemukan": "2026-11-12T10:15:00+07:00",
+    "jumlah_share": 180,
+    "jumlah_view": 4200,
+    "laju_sebar": 12,
+    "pengikut_pengunggah": 700
   },
   {
     "claim_id": "c003",
-    "teks_klaim": "Video tank TNI dikerahkan ke Kepulauan Riau untuk persiapan perang",
-    "jenis_media": "video",
-    "jumlah_share": 2100,
-    "jumlah_view": 60000,
-    "laju_sebar": 150,
-    "pengikut_pengunggah": 5000,
-    "umur_jam": 20
+    "teks_klaim": "Pendaftaran Bintara TNI AD 2027 dipungut biaya Rp15 juta",
+    "jenis_media": "teks",
+    "tanggal_ditemukan": "2026-11-10T19:00:00+07:00",
+    "jumlah_share": 640,
+    "jumlah_view": 21000,
+    "laju_sebar": 40,
+    "pengikut_pengunggah": 900
   }
 ]

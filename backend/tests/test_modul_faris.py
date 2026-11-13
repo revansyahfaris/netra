@@ -130,31 +130,3 @@ def test_temuan_dari_video_lokal(video):
     asli, viral, _ = video
     t = frames.temuan_dari_video(str(viral), str(asli))
     assert t.metode == "frame_match" and t.resolusi == 720 and t.cuplikan
-
-
-# ---------- Alur API lengkap sampai bukti publik ----------
-
-def test_alur_persetujuan_dan_bukti():
-    from fastapi.testclient import TestClient
-    from main import app
-    with TestClient(app) as c:
-        assert c.get("/bukti/c001").status_code == 404           # belum diverifikasi
-        assert c.post("/pipeline/c001").status_code == 200
-        antre = c.get("/persetujuan").json()
-        assert [i["klaim"]["claim_id"] for i in antre] == ["c001"]
-        assert c.get("/bukti/c001").status_code == 404           # belum disetujui
-
-        r = c.post("/persetujuan/c001", json={"keputusan": "disetujui", "petugas": "Serka Budi",
-                                              "draf_final": {"kartu": "Video 2019", "pendek": "Lama", "whatsapp": "Cek"}})
-        assert r.status_code == 200 and r.json()["status"] == "disetujui"
-        assert c.get("/persetujuan").json() == []
-        b = c.get("/bukti/c001").json()
-        assert b["klarifikasi"]["kartu"] == "Video 2019" and b["sumber_pendukung"]
-        h = c.get("/bukti/c001/halaman")
-        assert h.status_code == 200 and "Video 2019" in h.text and "<script" not in h.text
-
-        c.post("/pipeline/c002")
-        c.post("/persetujuan/c002", json={"keputusan": "ditolak", "petugas": "Serka Budi", "catatan": "sumber kurang"})
-        assert c.get("/bukti/c002").status_code == 404
-        assert len(c.get("/bukti").json()) == 1
-        assert c.post("/persetujuan/c003", json={"keputusan": "disetujui", "petugas": "x"}).status_code == 400

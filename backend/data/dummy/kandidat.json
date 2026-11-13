@@ -1,36 +1,109 @@
 {
-  "_catatan": "Kandidat untuk mode demo (tanpa SERPAPI_KEY). Berisi artikel klarifikasi yang benar-benar ada. Untuk c001, tambahkan URL video asli 2021 lewat url_manual saat sudah ditemukan. Tanggal klaim demo dihitung dari umur_jam saat server start.",
+  "_catatan": "Kandidat contoh untuk mode demo (tanpa SERPAPI_KEY). Ganti URL dengan sumber asli kasus demo kalian.",
   "c001": [
     {
-      "url": "https://rri.co.id/nabire/hukum/kriminalitas/2599930/rekaman-2021-bukan-bukti-kasus-terkini-koops-habema-luruskan-fakta-video-beredar",
-      "metode": "keyword",
-      "kemiripan": 0.85,
+      "url": "https://www.youtube.com/watch?v=CONTOH-ASLI-2019",
+      "metode": "frame_match",
+      "kemiripan": 0.93,
       "jenis_sumber": "media",
-      "judul": "Rekaman 2021 Bukan Bukti Kasus Terkini, Koops Habema Luruskan Fakta Video Beredar",
-      "tanggal_unggah": "2026-07-29",
-      "cuplikan": "Video tersebut merupakan rekaman kegiatan personel Satgas Yonif 501/BY pada tahun 2021 saat pengecekan dan pengamanan di lingkungan Kantor Bupati Intan Jaya."
+      "judul": "Liputan pengamanan unjuk rasa, Agustus 2019",
+      "tanggal_unggah": "2019-08-21",
+      "cuplikan": "00:42",
+      "resolusi": 1080,
+      "ada_watermark": false,
+      "kecocokan_audio": 0.88,
+      "uploader": "kompastv"
+    },
+    {
+      "url": "https://www.facebook.com/watch/?v=CONTOH-REUPLOAD-2022",
+      "metode": "frame_match",
+      "kemiripan": 0.9,
+      "jenis_sumber": "pribadi",
+      "judul": "Video beredar ulang 2022",
+      "tanggal_unggah": "2022-03-02",
+      "cuplikan": "00:05",
+      "resolusi": 720,
+      "kecocokan_audio": 0.81
+    },
+    {
+      "url": "https://www.tiktok.com/@akun.contoh/video/CONTOH-VIRAL",
+      "metode": "frame_match",
+      "kemiripan": 0.97,
+      "jenis_sumber": "pribadi",
+      "judul": "Narasi baru: disebut terjadi minggu ini",
+      "tanggal_unggah": "2026-11-09",
+      "cuplikan": "00:00",
+      "resolusi": 480,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.95
+    }
+  ],
+  "c001b": [
+    {
+      "url": "https://www.tiktok.com/@akun.lama/video/CONTOH-2023",
+      "metode": "frame_match",
+      "kemiripan": 0.94,
+      "jenis_sumber": "pribadi",
+      "judul": "Video serupa, unggahan 2023",
+      "tanggal_unggah": "2023-04-11",
+      "cuplikan": "00:18",
+      "resolusi": 720,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.9
+    },
+    {
+      "url": "https://www.facebook.com/watch/?v=CONTOH-REUPLOAD-2025",
+      "metode": "frame_match",
+      "kemiripan": 0.91,
+      "jenis_sumber": "pribadi",
+      "judul": "Unggahan ulang tanpa sumber",
+      "tanggal_unggah": "2025-09-02",
+      "cuplikan": "00:04",
+      "resolusi": 480,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.86
+    },
+    {
+      "url": "https://www.instagram.com/p/CONTOH-2026/",
+      "metode": "frame_match",
+      "kemiripan": 0.96,
+      "jenis_sumber": "pribadi",
+      "judul": "Narasi baru: disebut pekan ini",
+      "tanggal_unggah": "2026-11-12",
+      "cuplikan": "00:00",
+      "resolusi": 480,
+      "ada_watermark": true,
+      "kecocokan_audio": 0.93
     }
   ],
   "c002": [
     {
-      "url": "https://www.merahputih.com/post/read/hoaks-atau-fakta-mahasiswa-bisa-minta-bantuan-ke-kodam-jika-ingin-demo",
+      "url": "https://tniad.mil.id/CONTOH-siaran-pers-kasad",
       "metode": "kutipan",
-      "kemiripan": 0.75,
+      "kemiripan": 0.55,
+      "jenis_sumber": "resmi",
+      "judul": "Siaran pers Kasad: TNI AD tegak lurus pada supremasi sipil",
+      "tanggal_unggah": "2026-11-08",
+      "cuplikan": "Kalimat yang beredar tidak ada dalam sambutan; Kasad menegaskan TNI tunduk pada otoritas sipil."
+    },
+    {
+      "url": "https://www.antaranews.com/CONTOH-berita-sambutan-kasad",
+      "metode": "keyword",
+      "kemiripan": 0.6,
       "jenis_sumber": "media",
-      "judul": "[HOAKS atau FAKTA]: Mahasiswa Bisa Minta Bantuan ke Kodam jika Ingin Demo",
-      "tanggal_unggah": "2020-06-30",
-      "cuplikan": "Pernyataan Sisriadi pernah dimuat CNN Indonesia 26 September 2019: pengawalan demonstrasi adalah kewenangan Polri, TNI membantu jika tenaga polisi tidak cukup."
+      "judul": "Kasad beri sambutan di acara pembukaan",
+      "tanggal_unggah": "2026-11-08",
+      "cuplikan": "Dalam sambutannya, Kasad menekankan netralitas dan profesionalitas prajurit."
     }
   ],
   "c003": [
     {
-      "url": "https://www.kompas.com/cekfakta/read/2023/09/20/194500982/-hoaks-video-persiapan-perang-tni-di-kepulauan-riau",
+      "url": "https://rekrutmen-tniad.mil.id/CONTOH-pengumuman",
       "metode": "keyword",
-      "kemiripan": 0.8,
-      "jenis_sumber": "media",
-      "judul": "[HOAKS] Video Persiapan Perang TNI di Kepulauan Riau",
-      "tanggal_unggah": "2023-09-20",
-      "cuplikan": "Video dengan klaim persiapan perang TNI di Kepulauan Riau merupakan konten lama."
+      "kemiripan": 0.7,
+      "jenis_sumber": "resmi",
+      "judul": "Pengumuman resmi penerimaan Bintara TNI AD: tidak dipungut biaya",
+      "tanggal_unggah": "2026-10-01"
     }
   ]
 }

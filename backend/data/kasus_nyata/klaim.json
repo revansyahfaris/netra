@@ -1,0 +1,32 @@
+[
+  {
+    "claim_id": "r001",
+    "teks_klaim": "Video aparat TNI mendobrak pintu dan mengambil komputer di Kantor Bupati Intan Jaya, disebut terjadi pada 23 Juli 2026",
+    "jenis_media": "video",
+    "jumlah_share": 9800,
+    "jumlah_view": 410000,
+    "laju_sebar": 1100,
+    "pengikut_pengunggah": 250000,
+    "umur_jam": 3
+  },
+  {
+    "claim_id": "r002",
+    "teks_klaim": "Maklumat Kapuspen TNI Mayjen Sisriadi: mahasiswa bisa minta pendampingan Kodam saat demo karena kewenangan bukan lagi di tangan Panglima TNI",
+    "jenis_media": "gambar",
+    "jumlah_share": 4200,
+    "jumlah_view": 95000,
+    "laju_sebar": 380,
+    "pengikut_pengunggah": 12000,
+    "umur_jam": 6
+  },
+  {
+    "claim_id": "r003",
+    "teks_klaim": "Video tank TNI dikerahkan ke Kepulauan Riau untuk persiapan perang",
+    "jenis_media": "video",
+    "jumlah_share": 2100,
+    "jumlah_view": 60000,
+    "laju_sebar": 150,
+    "pengikut_pengunggah": 5000,
+    "umur_jam": 20
+  }
+]

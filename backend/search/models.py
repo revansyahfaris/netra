@@ -35,6 +35,10 @@ class Temuan:
             ada_watermark=self.ada_watermark,
             kecocokan_audio=None if self.kecocokan_audio is None else round(self.kecocokan_audio, 2),
             skor=None if self.skor is None else round(self.skor, 2),
+            # Dibutuhkan dashboard: tanpa ini kartu kandidat cuma menampilkan URL
+            judul=self.judul or None,
+            uploader=self.uploader,
+            rincian_skor=self.rincian_skor,
         )
 
 
