@@ -49,10 +49,23 @@ function namaSitus(url: string): string {
   }
 }
 
+/** Data lama kadang menyimpan awalan "[DRAF]"; status draf sudah ditandai di slide. */
+function bersihkan(teks: string | null | undefined): string {
+  return (teks ?? "").replace(/^\s*\[DRAF\]\s*/i, "").trim();
+}
+
+function samaMedia(a: string, b: string | null): boolean {
+  if (!b) return false;
+  const norm = (u: string) =>
+    u.replace(/^https?:\/\/(www\.)?/, "").replace(/[?#].*$/, "").replace(/\/+$/, "");
+  return norm(a) === norm(b) || norm(a).startsWith(norm(b) + "/");
+}
+
 function susunIsi(
   verifikasi: HasilVerifikasi,
   kandidat: KandidatSumber[],
   kartu: string,
+  mediaViral: string | null,
 ) {
   const bukti =
     verifikasi.bukti.find((b) => b.teks_sumber) ?? verifikasi.bukti[0] ?? null;
@@ -60,7 +73,9 @@ function susunIsi(
     bukti?.url ?? verifikasi.sumber_utama ?? kandidat[0]?.url ?? null;
   const k = kandidat.find((x) => x.url === urlSumber) ?? kandidat[0] ?? null;
   const ytId = (urlSumber && idYoutube(urlSumber)) || (k && idYoutube(k.url));
+  // Konten viral bukan sumber: jangan ikut tercantum di daftar sumber
   const sumber = verifikasi.bukti
+    .filter((b) => !samaMedia(b.url, mediaViral))
     .filter(
       (b, i, arr) =>
         arr.findIndex((x) => namaSitus(x.url) === namaSitus(b.url)) === i,
@@ -76,7 +91,7 @@ function susunIsi(
   return {
     fakta: bukti?.teks_sumber || k?.judul || verifikasi.ringkasan || "",
     // Teks kartu dari draf klarifikasi memang ditulis untuk publik (tanpa jargon internal)
-    penjelasan: kartu || null,
+    penjelasan: bersihkan(kartu) || null,
     viral: bukti?.teks_viral || null,
     penerbit: k?.uploader || (urlSumber ? namaSitus(urlSumber) : null),
     tanggal: k?.tanggal_unggah ?? null,
@@ -261,10 +276,10 @@ export function PostinganIG({
     simpanLogo([...logo, ...baru].slice(0, 3));
   }
 
-  const isi = susunIsi(verifikasi, kandidat, draf.kartu);
+  const isi = susunIsi(verifikasi, kandidat, draf.kartu, klaim.media_url);
   const disetujui = verifikasi.status_persetujuan === "disetujui";
   const vonis = VONIS[verifikasi.perubahan[0] ?? "lainnya"] ?? "KELIRU";
-  const caption = `${draf.pendek}\n\nSumber: ${isi.sumber.map((s) => s.situs).join(", ") || "-"}\n\n#CekFakta #Klarifikasi #SaringSebelumSharing`;
+  const caption = `${bersihkan(draf.pendek)}\n\nSumber: ${isi.sumber.map((s) => s.situs).join(", ") || "-"}\n\n#CekFakta #Klarifikasi #SaringSebelumSharing`;
 
   async function unduh() {
     setMengunduh(true);
