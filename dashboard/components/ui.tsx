@@ -30,13 +30,22 @@ export function SkorBar({
   nilai,
   label,
   compact = false,
+  netral = false,
 }: {
   nilai: number | null;
   label?: string;
   compact?: boolean;
+  /** true untuk skor yang bukan tingkat bahaya (mis. skor sumber asli) */
+  netral?: boolean;
 }) {
   const v = Math.max(0, Math.min(nilai ?? 0, 1));
-  const warna = v >= 0.75 ? "bg-rose-500" : v >= 0.5 ? "bg-amber-500" : "bg-slate-400";
+  const warna = netral
+    ? "bg-brand-500"
+    : v >= 0.75
+      ? "bg-rose-500"
+      : v >= 0.5
+        ? "bg-amber-500"
+        : "bg-slate-400";
   return (
     <div className="w-full">
       {label && (

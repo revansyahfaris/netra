@@ -7,15 +7,15 @@ const KUNCI = "netra:panduan-ditutup";
 const LANGKAH = [
   {
     judul: "Pilih klaim",
-    isi: "Antrean berisi konten viral dari sistem deteksi, sudah diurutkan menurut prioritas: seberapa sensitif topiknya dan seberapa cepat menyebar.",
+    isi: "Konten viral dari sistem deteksi, diurutkan menurut sensitivitas dan kecepatan sebar.",
   },
   {
     judul: "Periksa paket bukti",
-    isi: "Netra melacak sumber paling awal, mencocokkan frame, audio, dan kutipan, lalu menunjukkan bagian mana yang diubah beserta buktinya.",
+    isi: "Sumber paling awal, kecocokan frame dan audio, serta bagian yang diubah.",
   },
   {
     judul: "Putuskan sebagai petugas",
-    isi: "Setujui atau tolak draf klarifikasi. Tidak ada yang tayang tanpa persetujuan manusia. Setelah disetujui, buka halaman bukti publik.",
+    isi: "Tidak ada klarifikasi yang tayang tanpa persetujuan manusia.",
   },
 ];
 
@@ -42,17 +42,14 @@ export function PanduanPanelis() {
   if (!tampil) return null;
 
   return (
-    <section className="rounded-xl border border-brand-100 bg-brand-50/60 p-5">
+    <section className="rounded-xl border border-brand-100 bg-brand-50/60 px-5 py-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Panduan singkat</p>
           <h2 className="mt-1 text-lg font-semibold text-slate-900">
             Netra tidak menebak hoaks. Netra membuktikannya.
           </h2>
-          <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            Deteksi sudah dikerjakan sistem lain. Netra mengambil alih setelahnya: mencari sumber asli,
-            membuktikan apa yang diubah, dan menyiapkan klarifikasi untuk disetujui petugas.
-          </p>
+
         </div>
         <button
           type="button"
@@ -63,23 +60,18 @@ export function PanduanPanelis() {
           Tutup
         </button>
       </div>
-      <ol className="mt-4 grid gap-3 md:grid-cols-3">
+      <ol className="mt-3 grid gap-2 md:grid-cols-3">
         {LANGKAH.map((l, i) => (
-          <li key={l.judul} className="rounded-lg border border-white bg-white/80 p-3">
-            <p className="text-sm font-semibold text-slate-900">
-              <span className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand-600 text-[11px] text-white">
-                {i + 1}
-              </span>
-              {l.judul}
-            </p>
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-600">{l.isi}</p>
+          <li key={l.judul} className="flex gap-2 text-xs leading-relaxed text-slate-600" title={l.isi}>
+            <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
+              {i + 1}
+            </span>
+            <span>
+              <span className="font-semibold text-slate-900">{l.judul}.</span> {l.isi}
+            </span>
           </li>
         ))}
       </ol>
-      <p className="mt-3 text-xs text-slate-500">
-        Klaim yang sudah diproses menampilkan hasil tersimpan. Menjalankan ulang pencarian memanggil
-        layanan berbayar dan bisa memakan beberapa menit, jadi pada demo publik prosesnya dibatasi.
-      </p>
     </section>
   );
 }

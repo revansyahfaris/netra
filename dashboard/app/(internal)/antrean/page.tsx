@@ -15,7 +15,6 @@ import {
   LABEL_LEVEL,
   LABEL_PIPELINE,
   LABEL_VERIFIKASI,
-  persen,
   WARNA_LEVEL,
   WARNA_PIPELINE,
   WARNA_VERIFIKASI,
@@ -211,16 +210,12 @@ export default function HalamanAntrean() {
 
         {!galat && tersaring.length > 0 && (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-sm">
+            <table className="w-full min-w-[720px] text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-2.5 font-medium">Prioritas</th>
+                  <th className="w-28 px-4 py-2.5 font-medium">Prioritas</th>
                   <th className="px-4 py-2.5 font-medium">Klaim</th>
-                  <th className="px-4 py-2.5 font-medium">Topik</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <th className="px-4 py-2.5 font-medium">Verifikasi</th>
-                  <th className="px-4 py-2.5 font-medium">Bukti</th>
-                  <th className="px-4 py-2.5" />
+                  <th className="w-56 px-4 py-2.5 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -230,7 +225,7 @@ export default function HalamanAntrean() {
                     onClick={() => router.push(`/klaim/${klaim.claim_id}`)}
                     className="cursor-pointer transition hover:bg-slate-50"
                   >
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm font-semibold text-slate-900">
                           {klaim.skor_prioritas != null ? klaim.skor_prioritas.toFixed(2) : "—"}
@@ -246,61 +241,44 @@ export default function HalamanAntrean() {
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 text-[11px] text-slate-400">{formatTanggal(klaim.tanggal_ditemukan)}</p>
                     </td>
-                    <td className="max-w-md px-4 py-3">
-                      <p className="line-clamp-2 font-medium text-slate-800">{klaim.teks_klaim}</p>
-                      <p className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                    <td className="px-4 py-3 align-top">
+                      <Link
+                        href={`/klaim/${klaim.claim_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="line-clamp-2 font-medium text-slate-800 hover:text-brand-700"
+                      >
+                        {klaim.teks_klaim}
+                      </Link>
+                      <p className="mt-1 text-[11px] text-slate-400">
                         <span className="font-mono">{klaim.claim_id}</span>
-                        <span>·</span>
-                        <span>{klaim.jenis_media}</span>
+                        {klaim.label_topik ? ` · ${klaim.label_topik}` : ""} · {klaim.jenis_media} ·{" "}
+                        {formatAngka(klaim.jumlah_share)} share · {formatTanggal(klaim.tanggal_ditemukan)}
                         {klaim.sumber_masuk === "manual" && (
-                          <>
-                            <span>·</span>
-                            <span className="font-medium text-brand-600">manual</span>
-                          </>
+                          <span className="font-medium text-brand-600"> · manual</span>
                         )}
-                        <span>·</span>
-                        <span>{formatAngka(klaim.jumlah_share)} share</span>
                       </p>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="text-xs capitalize text-slate-600">{klaim.label_topik ?? "—"}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={WARNA_PIPELINE[klaim.status_pipeline]}>
-                        {LABEL_PIPELINE[klaim.status_pipeline]}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 align-top">
                       {verifikasi ? (
                         <div className="space-y-1">
                           <Badge tone={WARNA_VERIFIKASI[verifikasi.status]}>
                             {LABEL_VERIFIKASI[verifikasi.status]}
                           </Badge>
-                          {verifikasi.status === "terbukti_diubah" && (
-                            <p className="text-[11px] text-slate-400">
-                              {verifikasi.status_persetujuan === "menunggu"
-                                ? `keyakinan ${persen(verifikasi.keyakinan)}`
-                                : verifikasi.status_persetujuan}
-                            </p>
-                          )}
+                          <p className="text-[11px] text-slate-400">
+                            {verifikasi.status === "terbukti_diubah"
+                              ? verifikasi.status_persetujuan === "menunggu"
+                                ? "menunggu keputusan petugas"
+                                : verifikasi.status_persetujuan
+                              : "dieskalasi ke petugas"}
+                            {verifikasi.bukti.length ? ` · ${verifikasi.bukti.length} bukti` : ""}
+                          </p>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400">belum</span>
+                        <Badge tone={WARNA_PIPELINE[klaim.status_pipeline]}>
+                          {LABEL_PIPELINE[klaim.status_pipeline]}
+                        </Badge>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600">
-                      {verifikasi?.bukti.length ? `${verifikasi.bukti.length} item` : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        href={`/klaim/${klaim.claim_id}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-xs font-medium text-brand-600 hover:text-brand-700"
-                      >
-                        Buka →
-                      </Link>
                     </td>
                   </tr>
                 ))}
