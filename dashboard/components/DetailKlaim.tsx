@@ -341,7 +341,16 @@ export function DetailKlaim({ id }: { id: string }) {
             {verifikasi ? (
               <>
                 <div className="grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Keyakinan" nilai={persen(verifikasi.keyakinan)} />
+                  <Info
+                    label="Keyakinan"
+                    nilai={
+                      verifikasi.status === "terbukti_diubah" ? (
+                        persen(verifikasi.keyakinan)
+                      ) : (
+                        <span className="text-slate-500">Tidak dinilai · keputusan petugas</span>
+                      )
+                    }
+                  />
                   <Info
                     label="Waktu proses"
                     nilai={verifikasi.waktu_proses_detik != null ? `${verifikasi.waktu_proses_detik}s` : "—"}
@@ -362,12 +371,20 @@ export function DetailKlaim({ id }: { id: string }) {
                 {verifikasi.perubahan.length > 0 && (
                   <div>
                     <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Apa yang diubah
+                      {verifikasi.status === "terbukti_diubah"
+                        ? "Apa yang diubah"
+                        : "Dugaan perubahan (belum terbukti)"}
                     </p>
                     <ul className="space-y-1 text-sm text-slate-700">
                       {verifikasi.perubahan.map((p) => (
                         <li key={p} className="flex gap-2">
-                          <span className="text-rose-500">▸</span>
+                          <span
+                            className={
+                              verifikasi.status === "terbukti_diubah" ? "text-rose-500" : "text-slate-400"
+                            }
+                          >
+                            ▸
+                          </span>
                           {LABEL_PERUBAHAN[p] ?? p}
                         </li>
                       ))}
