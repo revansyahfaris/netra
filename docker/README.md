@@ -22,6 +22,7 @@ docker compose up -d
 cd docker
 docker compose -f compose.cpu.yaml up -d
 ```
+*(Mode CPU otomatis mengunduh & menyimpan model `Systran/faster-whisper-small` di RAM (`STT_MODEL_TTL=-1`, `WHISPER__CPU_THREADS=3`) agar transkrip cepat tanpa jeda reload. Pastikan `STT_MODEL=Systran/faster-whisper-small` di `backend/.env`.)*
 
 ### Cek Status & Health
 ```bash

@@ -10,8 +10,11 @@ services:
     environment:
       - LOG_LEVEL=info
       - LOOPBACK_HOST_URL=http://localhost:8000
+      - STT_MODEL_TTL=-1
       - WHISPER__INFERENCE_DEVICE=cpu
       - WHISPER__COMPUTE_TYPE=int8
+      - WHISPER__CPU_THREADS=3
+      - 'PRELOAD_MODELS=["Systran/faster-whisper-small"]'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

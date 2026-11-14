@@ -34,7 +34,8 @@ DATABASE_URL = _key("DATABASE_URL")
 # Layanan Speech-to-Text (Whisper/speaches, API kompatibel OpenAI)
 STT_BASE_URL = os.getenv("STT_BASE_URL", "http://localhost:8100").rstrip("/")
 STT_API_KEY = _key("STT_API_KEY")
-STT_MODEL = os.getenv("STT_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
+# Default ringan untuk server CPU: Systran/faster-whisper-small (GPU bisa pakai deepdml/faster-whisper-large-v3-turbo-ct2)
+STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-small")
 # Isi data demo otomatis saat database masih kosong
 SEED_KALAU_KOSONG = os.getenv("SEED_KALAU_KOSONG", "1") != "0"
 # Izinkan POST /seed (reset data demo). Matikan saat dipakai sungguhan.

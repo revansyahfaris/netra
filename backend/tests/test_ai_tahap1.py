@@ -140,6 +140,7 @@ def test_transkrip_audio_sukses(tmp_path, monkeypatch):
     assert tangkapan["url"] == "http://localhost:8100/v1/audio/transcriptions"
     assert tangkapan["headers"] == {"Authorization": "Bearer rahasia-netra"}
     assert tangkapan["data"]["model"] == config.STT_MODEL
+    assert tangkapan["data"]["language"] == "id"
     assert tangkapan["data"]["response_format"] == "verbose_json"
     assert tangkapan["data"]["temperature"] == "0.0"
     assert hasil.teks == "TNI tetap netral."
