@@ -130,3 +130,150 @@ def test_temuan_dari_video_lokal(video):
     asli, viral, _ = video
     t = frames.temuan_dari_video(str(viral), str(asli))
     assert t.metode == "frame_match" and t.resolusi == 720 and t.cuplikan
+
+
+@butuh_ffmpeg
+def test_frame_match_video_panjang_berjendela(tmp_path):
+    """Video > 180 detik tetap terdeteksi saat cuplikan diambil setelah menit ke-3."""
+    asli_panjang = tmp_path / "panjang.mp4"
+    viral_akhir = tmp_path / "viral_akhir.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "mandelbrot=size=320x240:rate=5", "-t", "205",
+        "-f", "lavfi", "-i", "aevalsrc='sin(440*2*PI*t)*abs(sin(0.7*t)*sin(0.23*t*t))':s=8000:d=205",
+        "-c:v", "libx264", "-preset", "ultrafast", "-shortest", str(asli_panjang),
+    )
+    _ffmpeg(
+        "-ss", "185", "-t", "10", "-i", str(asli_panjang),
+        "-c:v", "libx264", "-preset", "ultrafast", str(viral_akhir),
+    )
+    cocok = frames.bandingkan(str(viral_akhir), str(asli_panjang), cache={})
+    assert cocok.kemiripan >= 0.7
+    assert cocok.detik_kandidat is not None and 178 <= cocok.detik_kandidat <= 198
+
+
+def test_url_kanonis_penerbit_dan_anti_duplikat_frame_match_palsu():
+    import url_kanonis
+
+    assert url_kanonis.penerbit_dari_url("https://news.detik.com/berita/d-1") == "news.detik.com"
+    assert url_kanonis.penerbit_dari_url("https://www.tiktok.com/@akun.x/video/123") == "tiktok.com/@akun.x"
+    assert url_kanonis.penerbit_dari_url("https://youtube.com/watch?v=abc", uploader="KompasTV") == "youtube.com/kompastv"
+
+    # Dua URL YouTube kanonis sama, keyword kuat (0.65) + frame match lemah (0.20)
+    # TIDAK boleh dilabeli sebagai frame_match 0.65
+    a = Temuan(
+        "https://www.youtube.com/watch?v=ABC123&si=tracking",
+        "keyword",
+        0.65,
+        jenis_sumber="media",
+        kemiripan_teks=0.65,
+        resolusi=720,
+    )
+    b = Temuan(
+        "https://youtu.be/ABC123",
+        "frame_match",
+        0.20,
+        jenis_sumber="media",
+        kemiripan_frame=0.20,
+        cuplikan="00:05",
+    )
+    digabung = ranking.gabung_duplikat([a, b])
+    assert len(digabung) == 1
+    assert digabung[0].metode == "keyword"
+    assert digabung[0].kemiripan == 0.65
+    assert digabung[0].kemiripan_frame == 0.20
+
+    # Sebaliknya, jika frame_match kuat (0.88), metode memang frame_match 0.88
+    c = Temuan("https://youtu.be/ABC123", "frame_match", 0.88, kemiripan_frame=0.88, cuplikan="01:10")
+    digabung2 = ranking.gabung_duplikat([a, c])
+    assert digabung2[0].metode == "frame_match" and digabung2[0].kemiripan == 0.88
+
+
+def test_korroborasi_independen_anti_buzzer():
+    tgl = datetime(2025, 5, 1, tzinfo=timezone.utc)
+    # 6 re-upload dari hanya 2 akun pribadi tidak boleh melampaui batas kontribusi pribadi / dianggap kredibel
+    semua = [
+        Temuan(f"https://www.tiktok.com/@buzzer1/video/{i}", "frame_match", 0.9, "pribadi", tanggal_unggah=tgl)
+        for i in range(4)
+    ] + [
+        Temuan(f"https://www.tiktok.com/@buzzer{i}/video/99", "frame_match", 0.88, "pribadi", tanggal_unggah=tgl)
+        for i in range(2, 5)
+    ]
+    ringkas_buzzer = ranking.evaluasi_korroborasi(semua)
+    klaster_buzzer = ringkas_buzzer["footage_cocok"]
+    assert klaster_buzzer["indikasi_buzzer"] is True
+    assert klaster_buzzer["jumlah_pribadi"] == 4
+    assert klaster_buzzer["jumlah_resmi"] == 0
+
+    # Begitu ada sumber media/resmi ikut menguatkan footage yang sama, indikasi buzzer hilang & skor naik
+    dengan_resmi = semua + [
+        Temuan("https://tniad.mil.id/rilis-asli", "frame_match", 0.91, "resmi", tanggal_unggah=tgl),
+    ]
+    hasil = ranking.peringkat(dengan_resmi)
+    ringkas_kredibel = ranking.evaluasi_korroborasi(hasil)
+    klaster_kredibel = ringkas_kredibel["footage_cocok"]
+    assert klaster_kredibel["indikasi_buzzer"] is False
+    assert klaster_kredibel["jumlah_resmi"] == 1
+    assert any(h.rincian_skor.get("korroborasi", 0.0) > 0.0 for h in hasil)
+
+
+def test_pipeline_pencarian_lens_video_dan_peristiwa(monkeypatch):
+    import config
+    from search import KonteksSinyal, cari_sumber, web_search
+
+    monkeypatch.setattr(config, "SERPAPI_KEY", "dummy-serp")
+    panggilan_lens = []
+    panggilan_google = []
+
+    monkeypatch.setattr(
+        web_search,
+        "cari_google",
+        lambda q, kutipan=False, maks=8: (panggilan_google.append(q) or []),
+    )
+    monkeypatch.setattr(web_search, "cari_youtube", lambda q, maks=5: [])
+
+    def fake_lens(url_gambar, maks=8, untuk_video=False):
+        panggilan_lens.append((url_gambar, untuk_video))
+        return [
+            Temuan(
+                "https://www.youtube.com/watch?v=LENSVID1",
+                "keyword",
+                0.65,
+                jenis_sumber="media",
+                dari_lens=True,
+                uploader="KompasTV",
+            )
+        ]
+
+    monkeypatch.setattr(web_search, "reverse_image", fake_lens)
+    monkeypatch.setattr(
+        frames,
+        "temuan_dari_video",
+        lambda viral, cand, cache=None: Temuan(
+            cand,
+            "frame_match",
+            0.91,
+            jenis_sumber="media",
+            cuplikan="00:30",
+            kemiripan_frame=0.91,
+        ),
+    )
+
+    k = klaim(
+        claim_id="vid_lens",
+        teks_klaim="Video disebut aksi terbaru",
+        jenis_media="video",
+        media_url="https://example.com/viral.mp4",
+    )
+    konteks = KonteksSinyal(
+        stt_teks="Sambutan pembukaan latihan gabungan di Situbondo 2021",
+        ocr_teks=["KOMPASTV SITUBONDO"],
+        watermark=["TikTok @akun"],
+        keyframe_urls=["https://tunnel.example.id/media-sementara/tok1"],
+    )
+    hasil, proses = cari_sumber(k, konteks=konteks)
+    assert panggilan_lens == [("https://tunnel.example.id/media-sementara/tok1", True)]
+    assert proses["query"]["peristiwa"]
+    assert any(p in panggilan_google for p in proses["query"]["peristiwa"])
+    assert "https://www.youtube.com/watch?v=LENSVID1" in proses["video_dicocokkan"]
+    assert "korroborasi" in proses
+    assert hasil.kandidat and hasil.kandidat[0].metode == "frame_match"

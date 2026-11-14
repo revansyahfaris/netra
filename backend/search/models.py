@@ -8,6 +8,16 @@ from schemas import KandidatSumber
 
 
 @dataclass
+class KonteksSinyal:
+    """Sinyal Tahap 1 (konten viral) yang dipakai untuk memperkaya pencarian Tier-1."""
+
+    stt_teks: str = ""
+    ocr_teks: list[str] = field(default_factory=list)
+    watermark: list[str] = field(default_factory=list)
+    keyframe_urls: list[str] = field(default_factory=list)   # URL publik keyframe untuk Google Lens
+
+
+@dataclass
 class Temuan:
     url: str
     metode: str                     # keyword / kutipan / frame_match
@@ -22,6 +32,12 @@ class Temuan:
     uploader: str | None = None
     skor: float | None = None
     rincian_skor: dict = field(default_factory=dict)
+    # Asal temuan: google / youtube / lens / phash / manual / demo
+    asal: str = ""
+    # Dipisah supaya kemiripan teks tidak pernah tercatat sebagai bukti frame match
+    kemiripan_teks: float | None = None
+    kemiripan_frame: float | None = None
+    dari_lens: bool = False
 
     def ke_kandidat(self) -> KandidatSumber:
         return KandidatSumber(

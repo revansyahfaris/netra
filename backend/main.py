@@ -10,15 +10,21 @@ Atau sekaligus: POST /pipeline/{id}
 """
 
 import logging
+import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+import ai
 import config
+import media_publik
 from store.db import mode as db_mode
 from priority import hitung_prioritas
 from schemas import (
@@ -30,9 +36,10 @@ from schemas import (
     KlaimLengkap,
     PermintaanPersetujuan,
 )
-from search import cari_sumber
+from search import KonteksSinyal, cari_sumber
 from store import (
     Repo,
+    TautanBukti,
     TidakBoleh,
     TidakDitemukan,
     get_repo,
@@ -79,8 +86,22 @@ def health():
         "jumlah_klaim": len(REPO.daftar_klaim()),
         "llm": "aktif" if config.llm_aktif() else "fallback keyword",
         "pencarian": "live" if config.search_aktif() else "demo",
+        "stt": "aktif" if config.stt_aktif() else "nonaktif",
+        "pipeline_ai": config.PIPELINE_AI,
+        "jit_tier2": config.JIT_TIER2,
+        "media_publik": media_publik.aktif(),
         "database": db_mode(),
     }
+
+
+@app.get("/media-sementara/{token}", tags=["publik"])
+def ambil_media_sementara(token: str):
+    """Layani keyframe lokal sementara bertanda tangan HMAC untuk Google Lens."""
+    try:
+        path, mime = media_publik.buka_token(token)
+    except media_publik.TokenTidakSah as e:
+        raise HTTPException(404, str(e))
+    return FileResponse(path, media_type=mime)
 
 
 # ---------- Prioritas (Faris) ----------
@@ -115,13 +136,55 @@ class PermintaanCari(BaseModel):
     url_manual: list[str] = []   # kandidat yang ditemukan petugas secara manual (semi-manual)
 
 
+def _siapkan_konteks_sinyal(klaim: Klaim) -> tuple[KonteksSinyal | None, ai.SinyalKonten | None]:
+    """Jalankan Tahap 1 sebelum pencarian saat mode AI aktif, sekaligus terbitkan URL keyframe."""
+    if not config.PIPELINE_AI:
+        return None, None
+    sumber_eksternal = bool(
+        config.search_aktif() or config.llm_aktif() or config.stt_aktif()
+    )
+    if not sumber_eksternal or klaim.jenis_media == "teks" or not klaim.media_url:
+        return None, None
+    if ai.adalah_url_placeholder(str(klaim.media_url)):
+        return None, None
+
+    sinyal = ai.ekstrak_sinyal_klaim(klaim, ambil_konten_eksternal=True)
+    keyframe_urls = [
+        url
+        for kf in sinyal.keyframes_lokal[:3]
+        if (url := media_publik.terbitkan_url(Path(kf))) is not None
+    ]
+    konteks = KonteksSinyal(
+        stt_teks=sinyal.stt_teks,
+        ocr_teks=list(sinyal.ocr.teks_unik),
+        watermark=list(sinyal.ocr.watermark_terdeteksi),
+        keyframe_urls=keyframe_urls,
+    )
+    return konteks, sinyal
+
+
+def _jalankan_pencarian_internal(
+    klaim: Klaim,
+    url_manual: list[str] | None = None,
+) -> tuple[HasilPencarian, dict, ai.SinyalKonten | None]:
+    manual = list(url_manual or [])
+    konteks, sinyal = _siapkan_konteks_sinyal(klaim)
+    hasil, proses = cari_sumber(klaim, manual, konteks=konteks)
+    if sinyal is not None:
+        proses["sinyal_klaim"] = sinyal.model_dump(mode="json")
+        if konteks and konteks.keyframe_urls:
+            proses["jumlah_keyframe_lens"] = len(konteks.keyframe_urls)
+    hasil = hasil.model_copy(update={"mode": proses.get("mode", "demo")})
+    tersimpan = REPO.simpan_pencarian(hasil, proses, aktor="api")
+    return tersimpan, proses, sinyal
+
+
 @app.post("/cari/{claim_id}", response_model=HasilPencarian, tags=["pencarian"])
 def cari(claim_id: str, req: PermintaanCari | None = None):
     """Cari kandidat sumber asli, lalu urutkan dari yang paling mungkin asli."""
     k = _ambil_klaim(claim_id)
-    hasil, proses = cari_sumber(k, (req.url_manual if req else []))
-    hasil = hasil.model_copy(update={"mode": proses.get("mode", "demo")})
-    return REPO.simpan_pencarian(hasil, proses, aktor="api")
+    hasil, _, _ = _jalankan_pencarian_internal(k, (req.url_manual if req else []))
+    return hasil
 
 
 @app.get("/cari/{claim_id}", response_model=HasilPencarian, tags=["pencarian"])
@@ -143,10 +206,9 @@ def proses_pencarian(claim_id: str):
 
 # ---------- Verifikasi & klarifikasi (Adriel) ----------
 
-def jalankan_verifikasi(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifikasi:
-    """TODO(Adriel): ganti dengan RAG + OCR/transkrip + perbandingan LLM.
+def _verifikasi_deterministik(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifikasi:
+    """Fallback deterministik saat `PIPELINE_AI=0` atau API LLM tidak dikonfigurasi.
 
-    Versi sementara ini deterministik supaya dashboard bisa diuji end-to-end:
     - tanpa kandidat                  -> tidak_ditemukan
     - semua kandidat pribadi/watermark -> belum_bisa_diverifikasi (eskalasi)
     - ada kandidat bersih             -> terbukti_diubah + bukti metadata
@@ -252,14 +314,72 @@ def jalankan_verifikasi(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifik
     )
 
 
+def _muat_sinyal_dari_proses(proses: dict | None) -> ai.SinyalKonten | None:
+    mentah = (proses or {}).get("sinyal_klaim")
+    if not isinstance(mentah, dict):
+        return None
+    try:
+        return ai.SinyalKonten.model_validate(mentah)
+    except Exception:
+        return None
+
+
+def jalankan_verifikasi_lengkap(
+    klaim: Klaim,
+    pencarian: HasilPencarian,
+    *,
+    proses: dict | None = None,
+    sinyal_klaim_awal: ai.SinyalKonten | None = None,
+) -> tuple[HasilVerifikasi, list[TautanBukti] | None]:
+    """Jalankan pipeline AI penuh (Tahap 1-5) atau fallback deterministik jika kunci/flag nonaktif."""
+    if not config.PIPELINE_AI or not config.llm_aktif():
+        return _verifikasi_deterministik(klaim, pencarian), None
+
+    mulai = time.perf_counter()
+    sinyal_awal = sinyal_klaim_awal or _muat_sinyal_dari_proses(proses)
+    ambil_eksternal = (pencarian.mode != "demo") or any(
+        not ai.adalah_url_placeholder(str(k.url)) for k in pencarian.kandidat
+    )
+    hasil_tahap2 = ai.jalankan_tahap2(
+        klaim,
+        pencarian,
+        ambil_konten_eksternal=ambil_eksternal,
+        sinyal_klaim_awal=sinyal_awal,
+        korroborasi=(proses or {}).get("korroborasi"),
+    )
+    hasil_v4 = ai.verifikasi_silang(klaim, hasil_tahap2)
+    waktu = round(time.perf_counter() - mulai, 3)
+    hasil_v5 = ai.susun_hasil_verifikasi(
+        klaim,
+        hasil_tahap2,
+        hasil_v4,
+        waktu_proses_detik=waktu,
+        buat_draf_llm=True,
+    )
+    tautan = ai.kumpulkan_tautan_bukti(
+        klaim,
+        hasil_tahap2,
+        hasil_v4,
+        hasil_pencarian=pencarian,
+    )
+    return hasil_v5, tautan
+
+
+def jalankan_verifikasi(klaim: Klaim, pencarian: HasilPencarian) -> HasilVerifikasi:
+    """Wrapper kompatibel untuk pemanggil lama yang hanya mengharapkan `HasilVerifikasi`."""
+    hasil, _ = jalankan_verifikasi_lengkap(klaim, pencarian)
+    return hasil
+
+
 @app.post("/verifikasi/{claim_id}", response_model=HasilVerifikasi, tags=["verifikasi"])
 def verifikasi(claim_id: str):
     k = _ambil_klaim(claim_id)
-    if REPO.ambil_pencarian(claim_id) is None:
+    tersimpan = REPO.ambil_pencarian(claim_id)
+    if tersimpan is None:
         raise HTTPException(400, "Jalankan /cari dulu untuk klaim ini")
-    pencarian = REPO.ambil_pencarian(claim_id)[0]
-    hasil = jalankan_verifikasi(k, pencarian)
-    return REPO.simpan_verifikasi(hasil, aktor="api")
+    pencarian, proses = tersimpan
+    hasil, tautan = jalankan_verifikasi_lengkap(k, pencarian, proses=proses)
+    return REPO.simpan_verifikasi(hasil, aktor="api", tautan_bukti=tautan)
 
 
 @app.get("/verifikasi/{claim_id}", response_model=HasilVerifikasi, tags=["verifikasi"])
@@ -290,13 +410,166 @@ class HasilPipeline(BaseModel):
     verifikasi: HasilVerifikasi
 
 
+class StatusPekerjaanPipeline(BaseModel):
+    claim_id: str
+    status_kerja: Literal["belum_dijalankan", "antre", "berjalan", "selesai", "gagal"]
+    tahap_saat_ini: str = "menunggu"
+    dimulai_pada: datetime | None = None
+    selesai_pada: datetime | None = None
+    error: str | None = None
+    mode_ai: bool = True
+
+
+_LOCK_PEKERJAAN = threading.Lock()
+_PEKERJAAN_PIPELINE: dict[str, StatusPekerjaanPipeline] = {}
+
+
+def _set_status_kerja(claim_id: str, **updates) -> StatusPekerjaanPipeline:
+    with _LOCK_PEKERJAAN:
+        lama = _PEKERJAAN_PIPELINE.get(claim_id)
+        if lama is None:
+            baru = StatusPekerjaanPipeline(
+                claim_id=claim_id,
+                status_kerja=updates.pop("status_kerja", "antre"),
+                mode_ai=updates.pop("mode_ai", config.PIPELINE_AI and config.llm_aktif()),
+                **updates,
+            )
+        else:
+            baru = lama.model_copy(update=updates)
+        _PEKERJAAN_PIPELINE[claim_id] = baru
+        return baru
+
+
+def _jalankan_pipeline_sinkron(
+    klaim: Klaim,
+    url_manual: list[str] | None = None,
+    *,
+    saat_tahap: str | None = None,
+) -> HasilPipeline:
+    if saat_tahap:
+        _set_status_kerja(klaim.claim_id, tahap_saat_ini="pencarian")
+    pencarian, proses, sinyal = _jalankan_pencarian_internal(klaim, url_manual)
+    if saat_tahap:
+        _set_status_kerja(klaim.claim_id, tahap_saat_ini="verifikasi")
+    hasil, tautan = jalankan_verifikasi_lengkap(
+        klaim,
+        pencarian,
+        proses=proses,
+        sinyal_klaim_awal=sinyal,
+    )
+    tersimpan = REPO.simpan_verifikasi(hasil, aktor="api", tautan_bukti=tautan)
+    klaim_akhir = REPO.ambil_klaim(klaim.claim_id) or klaim
+    return HasilPipeline(klaim=klaim_akhir, pencarian=pencarian, verifikasi=tersimpan)
+
+
+def _jalankan_job_pipeline(claim_id: str, url_manual: list[str]) -> None:
+    _set_status_kerja(
+        claim_id,
+        status_kerja="berjalan",
+        tahap_saat_ini="pencarian",
+        dimulai_pada=datetime.now(timezone.utc),
+        selesai_pada=None,
+        error=None,
+    )
+    try:
+        klaim = REPO.ambil_klaim(claim_id)
+        if klaim is None:
+            raise TidakDitemukan(f"Klaim {claim_id} tidak ditemukan")
+        _jalankan_pipeline_sinkron(klaim, url_manual, saat_tahap="ya")
+        _set_status_kerja(
+            claim_id,
+            status_kerja="selesai",
+            tahap_saat_ini="selesai",
+            selesai_pada=datetime.now(timezone.utc),
+        )
+    except Exception as e:
+        log.exception("Job latar belakang pipeline gagal (%s)", claim_id)
+        _set_status_kerja(
+            claim_id,
+            status_kerja="gagal",
+            tahap_saat_ini="gagal",
+            selesai_pada=datetime.now(timezone.utc),
+            error=str(e)[:300],
+        )
+
+
 @app.post("/pipeline/{claim_id}", response_model=HasilPipeline, tags=["pipeline"])
 def pipeline(claim_id: str, req: PermintaanCari | None = None):
-    """Cari sumber lalu verifikasi dalam satu panggilan (untuk demo)."""
+    """Cari sumber lalu verifikasi dalam satu panggilan sinkron."""
     k = _ambil_klaim(claim_id)
-    pencarian = cari(claim_id, req)
-    hasil = jalankan_verifikasi(k, pencarian)
-    return HasilPipeline(klaim=k, pencarian=pencarian, verifikasi=REPO.simpan_verifikasi(hasil, aktor="api"))
+    return _jalankan_pipeline_sinkron(k, (req.url_manual if req else []))
+
+
+@app.post(
+    "/pipeline/{claim_id}/antre",
+    response_model=StatusPekerjaanPipeline,
+    status_code=202,
+    tags=["pipeline"],
+)
+def antre_pipeline(
+    claim_id: str,
+    background_tasks: BackgroundTasks,
+    req: PermintaanCari | None = None,
+):
+    """Jadwalkan pipeline penuh di latar belakang dan segera kembalikan status antrean."""
+    _ambil_klaim(claim_id)
+    with _LOCK_PEKERJAAN:
+        aktif = _PEKERJAAN_PIPELINE.get(claim_id)
+        if aktif and aktif.status_kerja in ("antre", "berjalan"):
+            return aktif
+    status_awal = _set_status_kerja(
+        claim_id,
+        status_kerja="antre",
+        tahap_saat_ini="menunggu",
+        dimulai_pada=None,
+        selesai_pada=None,
+        error=None,
+        mode_ai=config.PIPELINE_AI and config.llm_aktif(),
+    )
+    background_tasks.add_task(
+        _jalankan_job_pipeline,
+        claim_id,
+        list(req.url_manual) if req else [],
+    )
+    return status_awal
+
+
+@app.get(
+    "/pipeline/{claim_id}/status",
+    response_model=StatusPekerjaanPipeline,
+    tags=["pipeline"],
+)
+def status_pipeline_kerja(claim_id: str):
+    """Pantau status pekerjaan pipeline latar belakang atau hasil yang sudah tersimpan."""
+    lengkap = REPO.ambil_lengkap(claim_id)
+    if lengkap is None:
+        raise HTTPException(404, "Klaim tidak ditemukan")
+    with _LOCK_PEKERJAAN:
+        job = _PEKERJAAN_PIPELINE.get(claim_id)
+    if job is not None:
+        return job
+    if lengkap.verifikasi is not None:
+        return StatusPekerjaanPipeline(
+            claim_id=claim_id,
+            status_kerja="selesai",
+            tahap_saat_ini="selesai",
+            selesai_pada=lengkap.verifikasi.waktu_verifikasi,
+            mode_ai=config.PIPELINE_AI and config.llm_aktif(),
+        )
+    if lengkap.pencarian is not None:
+        return StatusPekerjaanPipeline(
+            claim_id=claim_id,
+            status_kerja="selesai",
+            tahap_saat_ini="pencarian",
+            selesai_pada=lengkap.pencarian.diperbarui,
+            mode_ai=config.PIPELINE_AI and config.llm_aktif(),
+        )
+    return StatusPekerjaanPipeline(
+        claim_id=claim_id,
+        status_kerja="belum_dijalankan",
+        tahap_saat_ini="menunggu",
+        mode_ai=config.PIPELINE_AI and config.llm_aktif(),
+    )
 
 
 # ---------- Bukti publik & statistik ----------
@@ -340,5 +613,7 @@ def seed():
     """Reset data demo (dev). Matikan lewat IZINKAN_SEED=0."""
     if not config.IZINKAN_SEED:
         raise HTTPException(403, "Seed dimatikan")
+    with _LOCK_PEKERJAAN:
+        _PEKERJAAN_PIPELINE.clear()
     jumlah = seed_ulang(REPO)
     return {"dimuat": jumlah, "waktu": datetime.now().isoformat()}

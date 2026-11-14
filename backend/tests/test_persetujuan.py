@@ -12,6 +12,11 @@ from store.seed import muat_klaim
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATABASE_URL", f"sqlite:///{tmp_path / 'api.db'}")
+    # Isolasi tes API agar deterministik dan tidak menyentuh layanan eksternal saat offline
+    monkeypatch.setattr(config, "SERPAPI_KEY", "")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(config, "STT_BASE_URL", "")
+    monkeypatch.setattr(config, "PUBLIC_BASE_URL", "")
     store.reset_engine()
     import main as main_mod
 

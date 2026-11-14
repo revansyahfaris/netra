@@ -14,11 +14,12 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 import config
+import url_kanonis
 from schemas import (
     HasilPencarian,
     JenisMedia,
@@ -28,9 +29,9 @@ from schemas import (
     StatusVerifikasi,
 )
 
-from . import ekstraksi, ocr, rag, sumber
+from . import ekstraksi, embedding, ocr, rag, sumber
 from .ocr import HasilOCR
-from .rag import HasilCariKorpus
+from .rag import CakupanKorpus, HasilCariKorpus
 from .sumber import SinyalSumberAcuan, adalah_url_placeholder, transkrip_audio_aman
 from .stt import SegmenTranskrip
 
@@ -39,7 +40,10 @@ log = logging.getLogger("netra.ai.routing")
 AMBANG_KEMIRIPAN_MEMADAI = 0.50
 AMBANG_SKOR_MEMADAI = 0.45
 AMBANG_FRAME_MATCH_KUAT = 0.75
+AMBANG_TOPIK_TIER2 = 0.45
 AMBANG_RAG_VECTOR_RELEVAN = 0.55
+MAKS_KEYFRAME_RAG = 3
+MAKS_KANDIDAT_JIT = 5
 
 JalurVerifikasi = Literal[
     "tier1_ke_tahap4",
@@ -63,6 +67,7 @@ class SinyalKonten(BaseModel):
     sumber_stt: str = "kosong"
     ocr: HasilOCR = Field(default_factory=HasilOCR)
     media_lokal: str | None = None
+    keyframes_lokal: list[str] = Field(default_factory=list)
     catatan: str | None = None
 
     def query_rag(self, maks_karakter: int = 1500) -> str:
@@ -83,11 +88,12 @@ class SinyalKonten(BaseModel):
 
 
 class KeputusanRouting(BaseModel):
-    """Hasil evaluasi kesiapan kandidat Tier-1 sebelum ekstraksi penuh."""
+    """Hasil evaluasi kesiapan kandidat Tier-1 dan kelayakan Tier-2 sebelum ekstraksi penuh."""
 
     kandidat_bersih: list[KandidatSumber] = Field(default_factory=list)
     kandidat_memadai: list[KandidatSumber] = Field(default_factory=list)
     kandidat_ditolak: list[KandidatSumber] = Field(default_factory=list)
+    kandidat_tier2: list[KandidatSumber] = Field(default_factory=list)
     tier1_memadai: bool = False
     perlu_rag: bool = True
     alasan: str
@@ -108,6 +114,9 @@ class HasilTahap2(BaseModel):
     sinyal_sumber: list[SinyalSumberAcuan] = Field(default_factory=list)
     hasil_rag: list[HasilCariKorpus] = Field(default_factory=list)
     metode_terpakai: list[MetodeVerifikasi] = Field(default_factory=list)
+    jit_diindeks: list[str] = Field(default_factory=list)
+    jit_cache_hit: list[str] = Field(default_factory=list)
+    indikasi_buzzer: bool = False
 
 
 def ekstrak_sinyal_klaim(
@@ -153,6 +162,7 @@ def ekstrak_sinyal_klaim(
             media_url=media_str,
             ocr=hasil_ocr,
             media_lokal=str(path_lokal) if path_lokal else None,
+            keyframes_lokal=[str(path_lokal)] if path_lokal else [],
             catatan=hasil_ocr.catatan if hasil_ocr.sumber_ocr == "gagal" else None,
         )
 
@@ -171,9 +181,12 @@ def ekstrak_sinyal_klaim(
 
     hasil_stt = transkrip_audio_aman(hasil_media.audio_path)
     hasil_ocr = ocr.ocr_keyframes(hasil_media.keyframes, fallback_aman=True)
+    keyframes_lokal = sumber.pilih_keyframes_wakilan(
+        hasil_media.keyframes, maks=MAKS_KEYFRAME_RAG
+    )
     keyframe_wakilan = (
-        str(hasil_media.keyframes[len(hasil_media.keyframes) // 2][1])
-        if hasil_media.keyframes
+        keyframes_lokal[len(keyframes_lokal) // 2]
+        if keyframes_lokal
         else None
     )
     catatan_klaim = (
@@ -193,6 +206,7 @@ def ekstrak_sinyal_klaim(
         sumber_stt=hasil_stt.sumber_stt,
         ocr=hasil_ocr,
         media_lokal=keyframe_wakilan,
+        keyframes_lokal=keyframes_lokal,
         catatan=catatan_klaim,
     )
 
@@ -224,13 +238,38 @@ def _perlu_pengayaan_rag(klaim: Klaim, kandidat_memadai: list[KandidatSumber]) -
     return False
 
 
+def _layak_tier2_topik(
+    k: KandidatSumber,
+    ambang_skor: float = AMBANG_SKOR_MEMADAI,
+) -> bool:
+    """Sumbu B: kandidat resmi/media tanpa watermark yang relevan topiknya untuk JIT Tier-2."""
+    if k.jenis_sumber not in ("resmi", "media") or k.ada_watermark:
+        return False
+    skor_efektif = k.skor if k.skor is not None else k.kemiripan
+    return k.kemiripan >= AMBANG_TOPIK_TIER2 or skor_efektif >= ambang_skor
+
+
+def _kandidat_tier1_valid(
+    klaim: Klaim,
+    k: KandidatSumber,
+    ambang_kemiripan: float = AMBANG_KEMIRIPAN_MEMADAI,
+    ambang_skor: float = AMBANG_SKOR_MEMADAI,
+) -> bool:
+    """Sumbu A: kandidat bersih layak Tier-1 (video wajib punya frame_match memadai)."""
+    if not _kandidat_memadai(k, ambang_kemiripan=ambang_kemiripan, ambang_skor=ambang_skor):
+        return False
+    if klaim.jenis_media == "video":
+        return k.metode == "frame_match"
+    return True
+
+
 def evaluasi_kandidat(
     klaim: Klaim,
     pencarian: HasilPencarian,
     ambang_kemiripan: float = AMBANG_KEMIRIPAN_MEMADAI,
     ambang_skor: float = AMBANG_SKOR_MEMADAI,
 ) -> KeputusanRouting:
-    """Evaluasi kandidat Tier-1 untuk menentukan apakah layak ke Tahap 4 atau turun ke Tahap 3 RAG."""
+    """Evaluasi 2 sumbu: kecocokan footage (Tier-1) vs relevansi topik kredibel (Tier-2 JIT)."""
     kandidat = pencarian.kandidat
     if not kandidat:
         return KeputusanRouting(
@@ -247,6 +286,7 @@ def evaluasi_kandidat(
             kandidat_bersih=[],
             kandidat_memadai=[],
             kandidat_ditolak=ditolak,
+            kandidat_tier2=[],
             tier1_memadai=False,
             perlu_rag=True,
             alasan=(
@@ -256,19 +296,33 @@ def evaluasi_kandidat(
         )
 
     memadai = [
-        k for k in bersih if _kandidat_memadai(k, ambang_kemiripan=ambang_kemiripan, ambang_skor=ambang_skor)
+        k
+        for k in bersih
+        if _kandidat_tier1_valid(
+            klaim, k, ambang_kemiripan=ambang_kemiripan, ambang_skor=ambang_skor
+        )
     ]
+    kandidat_tier2 = [
+        k for k in bersih if k not in memadai and _layak_tier2_topik(k, ambang_skor=ambang_skor)
+    ]
+
     if not memadai:
+        alasan_turun = (
+            "Kecocokan footage Tier-1 rendah/tidak ada; teruskan kandidat topik kredibel ke Tier-2 JIT & Tahap 3 RAG."
+            if kandidat_tier2
+            else (
+                "Kandidat bersih Tier-1 memiliki kemiripan/skor di bawah ambang memadai; "
+                "teruskan ke Tahap 3 (RAG korpus resmi)."
+            )
+        )
         return KeputusanRouting(
             kandidat_bersih=bersih,
             kandidat_memadai=[],
             kandidat_ditolak=ditolak,
+            kandidat_tier2=kandidat_tier2,
             tier1_memadai=False,
             perlu_rag=True,
-            alasan=(
-                "Kandidat bersih Tier-1 memiliki kemiripan/skor di bawah ambang memadai; "
-                "teruskan ke Tahap 3 (RAG korpus resmi)."
-            ),
+            alasan=alasan_turun,
         )
 
     pengayaan = _perlu_pengayaan_rag(klaim, memadai)
@@ -281,6 +335,7 @@ def evaluasi_kandidat(
         kandidat_bersih=bersih,
         kandidat_memadai=memadai,
         kandidat_ditolak=ditolak,
+        kandidat_tier2=kandidat_tier2 if pengayaan else [],
         tier1_memadai=True,
         perlu_rag=pengayaan,
         alasan=alasan,
@@ -291,20 +346,28 @@ def _cari_korpus_relevan(
     sinyal: SinyalKonten,
     batas: int = 5,
     ambang_vector: float = AMBANG_RAG_VECTOR_RELEVAN,
+    cakupan: CakupanKorpus | list[CakupanKorpus] | None = None,
 ) -> list[HasilCariKorpus]:
     query = sinyal.query_rag()
-    media_path = Path(sinyal.media_lokal) if sinyal.media_lokal else None
-    if media_path is not None and not media_path.exists():
-        media_path = None
-    if not query and media_path is None:
+    daftar_media = [
+        Path(p) for p in sinyal.keyframes_lokal if Path(p).exists()
+    ][:MAKS_KEYFRAME_RAG]
+    if not daftar_media and sinyal.media_lokal:
+        kandidat_lokal = Path(sinyal.media_lokal)
+        if kandidat_lokal.exists():
+            daftar_media = [kandidat_lokal]
+    media_utama = daftar_media[0] if daftar_media else None
+    if not query and not daftar_media:
         return []
 
     mentah = rag.cari_korpus(
         query_teks=query,
-        media_path=media_path,
+        media_path=media_utama,
+        media_paths=daftar_media or None,
         batas=batas,
         ambang_skor=ambang_vector,
         fallback_aman=True,
+        cakupan=cakupan,
     )
     return [
         item
@@ -348,6 +411,100 @@ def _kumpulkan_metode(
     return metode
 
 
+def _deteksi_indikasi_buzzer(
+    pencarian: HasilPencarian,
+    korroborasi: dict[str, Any] | None = None,
+) -> bool:
+    if korroborasi is not None:
+        if "indikasi_buzzer" in korroborasi:
+            return bool(korroborasi["indikasi_buzzer"])
+        klaster_vals = [v for v in korroborasi.values() if isinstance(v, dict)]
+        if klaster_vals:
+            kredibel_klaster = sum(
+                int(v.get("jumlah_resmi", 0)) + int(v.get("jumlah_media", 0))
+                for v in klaster_vals
+            )
+            return kredibel_klaster == 0 and any(
+                bool(v.get("indikasi_buzzer")) for v in klaster_vals
+            )
+    if any(k.jenis_sumber in ("resmi", "media") for k in pencarian.kandidat):
+        return False
+    penerbit_pribadi = {
+        url_kanonis.penerbit_dari_url(str(k.url), k.uploader)
+        for k in pencarian.kandidat
+        if k.jenis_sumber == "pribadi"
+    }
+    return len(penerbit_pribadi) >= 3
+
+
+def _indeks_jit_tier2(
+    kandidat_tier2: list[KandidatSumber],
+    *,
+    ambil_konten_eksternal: bool,
+    maks_jit: int = MAKS_KANDIDAT_JIT,
+) -> tuple[list[str], list[str]]:
+    """Indeks kandidat Tier-2 relevan (beda angle / berita) ke pgvector cakupan 'temuan'."""
+    diindeks: list[str] = []
+    cache_hit: list[str] = []
+
+    for k in kandidat_tier2[: max(1, maks_jit)]:
+        url_str = str(k.url)
+        if adalah_url_placeholder(url_str):
+            continue
+        doc_id = url_kanonis.doc_id_dari_url(url_str)
+        try:
+            if rag.dokumen_masih_aktif(doc_id):
+                cache_hit.append(url_str)
+                continue
+        except Exception as e:
+            log.debug("Pengecekan cache JIT dilewati (%s): %s", url_str, e)
+
+        try:
+            sig = sumber.ekstrak_sinyal_kandidat(
+                k, ambil_konten_eksternal=ambil_konten_eksternal
+            )
+            if not sig.teks_isi.strip() and not sig.keyframes_lokal:
+                continue
+            jenis_media: JenisMedia = (
+                "video"
+                if sig.jenis_konten == "video"
+                else ("gambar" if sig.jenis_konten == "gambar" else "teks")
+            )
+            jenis_sumber: Literal["resmi", "media", "pribadi"] = (
+                "resmi" if k.jenis_sumber == "resmi" else "media"
+            )
+            dok = rag.DokumenKorpus(
+                doc_id=doc_id,
+                judul=sig.judul or k.judul or url_str,
+                url=url_str,
+                jenis_sumber=jenis_sumber,
+                jenis_media=jenis_media,
+                tanggal_terbit=sig.tanggal_unggah,
+                cakupan="temuan",
+            )
+            if sig.keyframes_lokal:
+                selesai = (
+                    sig.jendela_mulai_detik + sig.jendela_durasi_detik
+                    if sig.jendela_mulai_detik is not None and sig.jendela_durasi_detik is not None
+                    else None
+                )
+                rag.indeks_media_korpus(
+                    dok,
+                    media_paths=[Path(p) for p in sig.keyframes_lokal[:MAKS_KEYFRAME_RAG]],
+                    teks_pendamping=sig.teks_isi,
+                    detik_mulai=sig.jendela_mulai_detik,
+                    detik_selesai=selesai,
+                )
+            else:
+                rag.indeks_dokumen_teks(dok, sig.teks_isi)
+            diindeks.append(url_str)
+        except (rag.RAGError, embedding.EmbeddingError, Exception) as e:
+            log.warning("Indeks JIT Tier-2 dilewati (%s): %s", url_str, e)
+            continue
+
+    return diindeks, cache_hit
+
+
 def jalankan_tahap2(
     klaim: Klaim,
     pencarian: HasilPencarian,
@@ -357,15 +514,27 @@ def jalankan_tahap2(
     ambang_kemiripan: float = AMBANG_KEMIRIPAN_MEMADAI,
     ambang_skor: float = AMBANG_SKOR_MEMADAI,
     ambang_rag_vector: float = AMBANG_RAG_VECTOR_RELEVAN,
+    sinyal_klaim_awal: SinyalKonten | None = None,
+    jit_tier2: bool | None = None,
+    maks_jit: int = MAKS_KANDIDAT_JIT,
+    korroborasi: dict[str, Any] | None = None,
 ) -> HasilTahap2:
-    """Orkestrasi Tahap 2: sinyal klaim -> evaluasi Tier-1 -> ekstraksi sumber / fallback RAG -> routing."""
-    sinyal_klaim = ekstrak_sinyal_klaim(klaim, ambil_konten_eksternal=ambil_konten_eksternal)
+    """Orkestrasi Tahap 2: sinyal klaim -> evaluasi 2 sumbu -> Tier-1 / JIT Tier-2 / RAG -> routing."""
+    sinyal_klaim = (
+        sinyal_klaim_awal
+        if sinyal_klaim_awal is not None
+        else ekstrak_sinyal_klaim(klaim, ambil_konten_eksternal=ambil_konten_eksternal)
+    )
     keputusan = evaluasi_kandidat(
         klaim,
         pencarian,
         ambang_kemiripan=ambang_kemiripan,
         ambang_skor=ambang_skor,
     )
+    jit_aktif = config.JIT_TIER2 if jit_tier2 is None else jit_tier2
+    indikasi_buzzer = _deteksi_indikasi_buzzer(pencarian, korroborasi)
+    jit_diindeks: list[str] = []
+    jit_cache_hit: list[str] = []
 
     if keputusan.tier1_memadai:
         target_kandidat = keputusan.kandidat_memadai[: max(1, maks_kandidat)]
@@ -377,10 +546,20 @@ def jalankan_tahap2(
         semua_gagal_penuh = all(not s.ekstraksi_penuh_berhasil for s in sinyal_sumber)
         hasil_rag: list[HasilCariKorpus] = []
         if keputusan.perlu_rag or semua_gagal_penuh:
+            if jit_aktif and ambil_konten_eksternal and keputusan.kandidat_tier2:
+                jit_diindeks, jit_cache_hit = _indeks_jit_tier2(
+                    keputusan.kandidat_tier2,
+                    ambil_konten_eksternal=ambil_konten_eksternal,
+                    maks_jit=maks_jit,
+                )
+            cakupan_cari: CakupanKorpus | list[CakupanKorpus] = (
+                ["resmi", "temuan"] if keputusan.kandidat_tier2 else "resmi"
+            )
             hasil_rag = _cari_korpus_relevan(
                 sinyal_klaim,
                 batas=batas_rag,
                 ambang_vector=ambang_rag_vector,
+                cakupan=cakupan_cari,
             )
 
         jalur: JalurVerifikasi = "tier1_dan_rag_ke_tahap4" if hasil_rag else "tier1_ke_tahap4"
@@ -408,22 +587,40 @@ def jalankan_tahap2(
                 hasil_rag,
                 jalur,
             ),
+            jit_diindeks=jit_diindeks,
+            jit_cache_hit=jit_cache_hit,
+            indikasi_buzzer=indikasi_buzzer,
         )
 
-    # Jalur 2: Tier-1 tidak menemukan kandidat bersih yang meyakinkan -> Tahap 3 RAG
+    # Jalur 2: Tier-1 tidak menemukan kecocokan footage/sumber meyakinkan -> JIT Tier-2 (bila ada) & Tahap 3 RAG
+    if jit_aktif and ambil_konten_eksternal and keputusan.kandidat_tier2:
+        jit_diindeks, jit_cache_hit = _indeks_jit_tier2(
+            keputusan.kandidat_tier2,
+            ambil_konten_eksternal=ambil_konten_eksternal,
+            maks_jit=maks_jit,
+        )
+    cakupan_tier2: CakupanKorpus | list[CakupanKorpus] = (
+        ["resmi", "temuan"] if keputusan.kandidat_tier2 else "resmi"
+    )
     hasil_rag = _cari_korpus_relevan(
         sinyal_klaim,
         batas=batas_rag,
         ambang_vector=ambang_rag_vector,
+        cakupan=cakupan_tier2,
     )
     if hasil_rag:
+        info_jit = (
+            f" ({len(jit_diindeks)} sumber baru diindeks JIT, {len(jit_cache_hit)} dari cache)"
+            if (jit_diindeks or jit_cache_hit)
+            else ""
+        )
         return HasilTahap2(
             claim_id=klaim.claim_id,
             jalur="tier2_rag_ke_tahap4",
             siap_tahap4=True,
             status_rekomendasi=None,
             perlu_eskalasi=False,
-            alasan_routing=f"{keputusan.alasan} Ditemukan {len(hasil_rag)} rujukan resmi di Tahap 3 RAG.",
+            alasan_routing=f"{keputusan.alasan} Ditemukan {len(hasil_rag)} rujukan di Tahap 3 RAG{info_jit}.",
             sinyal_klaim=sinyal_klaim,
             kandidat_bersih=keputusan.kandidat_bersih,
             kandidat_ditolak=keputusan.kandidat_ditolak,
@@ -437,6 +634,9 @@ def jalankan_tahap2(
                 hasil_rag,
                 "tier2_rag_ke_tahap4",
             ),
+            jit_diindeks=jit_diindeks,
+            jit_cache_hit=jit_cache_hit,
+            indikasi_buzzer=indikasi_buzzer,
         )
 
     # Worst-case / tidak ditemukan: baik Tier-1 maupun Tier-2 RAG tidak menyediakan sumber bersih
@@ -448,8 +648,10 @@ def jalankan_tahap2(
         "belum_bisa_diverifikasi" if ada_kandidat_mentah else "tidak_ditemukan"
     )
     alasan_eskalasi = (
-        f"{keputusan.alasan} Pencarian Tahap 3 RAG juga tidak menemukan sumber resmi yang relevan."
+        f"{keputusan.alasan} Pencarian Tahap 3 RAG juga tidak menemukan sumber yang relevan."
     )
+    if indikasi_buzzer:
+        alasan_eskalasi += " Terdeteksi pola unggahan akun pribadi berulang tanpa rujukan resmi/media."
 
     return HasilTahap2(
         claim_id=klaim.claim_id,
@@ -471,4 +673,7 @@ def jalankan_tahap2(
             [],
             jalur_eskalasi,
         ),
+        jit_diindeks=jit_diindeks,
+        jit_cache_hit=jit_cache_hit,
+        indikasi_buzzer=indikasi_buzzer,
     )

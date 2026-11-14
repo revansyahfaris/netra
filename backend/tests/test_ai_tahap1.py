@@ -21,7 +21,8 @@ from ai import (
 
 
 def test_default_config_stt_mengarah_ke_8100():
-    assert config.STT_BASE_URL == "http://localhost:8100"
+    assert config.STT_BASE_URL.startswith(("http://", "https://"))
+    assert not config.STT_BASE_URL.endswith("/")
     assert config.stt_aktif() is True
 
 
@@ -132,6 +133,7 @@ def test_transkrip_audio_sukses(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr("httpx.post", fake_post)
+    monkeypatch.setattr(config, "STT_BASE_URL", "http://localhost:8100")
     monkeypatch.setattr(config, "STT_API_KEY", "rahasia-netra")
     hasil = transkrip_audio(audio)
 

@@ -513,3 +513,105 @@ def test_integrasi_dengan_data_dummy_demo(monkeypatch):
     assert r_c001.jalur == "tier1_ke_tahap4"
     assert r_c001.siap_tahap4 is True
     assert r_c001.sinyal_sumber[0].detik_cuplikan == 42.0
+
+
+def test_routing_dua_sumbu_dan_jit_tier2_cache_dan_multi_keyframe(tmp_path, monkeypatch):
+    kf_paths = []
+    for idx in range(3):
+        p = tmp_path / f"kf_{idx}.jpg"
+        p.write_bytes(b"jpg-dummy")
+        kf_paths.append(str(p))
+
+    klaim = _klaim(
+        claim_id="vid_jit",
+        teks_klaim="Video pasukan disebut terjadi kemarin",
+        jenis_media="video",
+        media_url="https://example.com/viral/v.mp4",
+    )
+    # Kandidat media bersih tapi hanya metode keyword (tanpa frame_match) -> harus masuk sumbu B Tier-2
+    k_hit = _kandidat(
+        url="https://news.detik.com/berita/d-111?utm_source=x",
+        jenis_sumber="media",
+        metode="keyword",
+        kemiripan=0.62,
+        skor=0.68,
+        judul="Berita Detik Sudah Ada",
+    )
+    k_baru = _kandidat(
+        url="https://kompas.com/read/2021/latihan-gabungan",
+        jenis_sumber="media",
+        metode="keyword",
+        kemiripan=0.58,
+        skor=0.64,
+        judul="Berita Kompas Baru",
+    )
+    pencarian = HasilPencarian(claim_id="vid_jit", kandidat=[k_hit, k_baru])
+
+    kep = evaluasi_kandidat(klaim, pencarian)
+    assert kep.tier1_memadai is False
+    assert len(kep.kandidat_tier2) == 2
+
+    from ai import doc_id_dari_url
+
+    id_hit = doc_id_dari_url(str(k_hit.url))
+    diindeks = []
+    cari_args = {}
+
+    monkeypatch.setattr("ai.rag.dokumen_masih_aktif", lambda doc_id: doc_id == id_hit)
+    monkeypatch.setattr(
+        "ai.sumber.ekstrak_sinyal_kandidat",
+        lambda cand, **kw: SinyalSumberAcuan(
+            url=str(cand.url),
+            judul=cand.judul,
+            jenis_sumber=cand.jenis_sumber,
+            jenis_konten="artikel",
+            sumber_ekstraksi="web_artikel",
+            ekstraksi_penuh_berhasil=True,
+            teks_isi="Liputan tahun 2021 latihan gabungan.",
+        ),
+    )
+    monkeypatch.setattr(
+        "ai.rag.indeks_dokumen_teks",
+        lambda dok, teks: diindeks.append((dok.doc_id, dok.cakupan, teks)) or 1,
+    )
+
+    def fake_cari(**kw):
+        cari_args.update(kw)
+        return [_rag_item(url=str(k_baru.url), doc_id=doc_id_dari_url(str(k_baru.url)), cakupan="temuan")]
+
+    monkeypatch.setattr("ai.rag.cari_korpus", fake_cari)
+    monkeypatch.setattr("ai.routing.ekstrak_sinyal_klaim", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("harus memakai sinyal_klaim_awal")))
+
+    sinyal_awal = SinyalKonten(
+        claim_id="vid_jit",
+        teks_klaim=klaim.teks_klaim,
+        jenis_media="video",
+        media_lokal=kf_paths[1],
+        keyframes_lokal=kf_paths,
+        stt_teks="Sambutan latihan tahun 2021.",
+    )
+    hasil = jalankan_tahap2(
+        klaim,
+        pencarian,
+        ambil_konten_eksternal=True,
+        sinyal_klaim_awal=sinyal_awal,
+        jit_tier2=True,
+    )
+    assert hasil.jalur == "tier2_rag_ke_tahap4"
+    assert len(hasil.jit_cache_hit) == 1
+    assert len(hasil.jit_diindeks) == 1
+    assert diindeks and diindeks[0][1] == "temuan"
+    assert len(cari_args["media_paths"]) == 3
+    assert cari_args["cakupan"] == ["resmi", "temuan"]
+
+    # Tanpa kandidat Tier-2 yang layak -> cari korpus harus membatasi cakupan='resmi'
+    cari_kosong = {}
+    monkeypatch.setattr("ai.rag.cari_korpus", lambda **kw: cari_kosong.update(kw) or [])
+    res_resmi = jalankan_tahap2(
+        klaim,
+        HasilPencarian(claim_id="vid_jit", kandidat=[]),
+        ambil_konten_eksternal=False,
+        sinyal_klaim_awal=sinyal_awal,
+    )
+    assert res_resmi.jalur == "eskalasi_tidak_ditemukan"
+    assert cari_kosong["cakupan"] == "resmi"

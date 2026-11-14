@@ -6,14 +6,16 @@ import pytest
 
 import config
 import store
+from ai import HasilCariKorpus, doc_id_dari_url
 from schemas import (
+    Bukti,
     DrafKlarifikasi,
     HasilPencarian,
     HasilVerifikasi,
     KandidatSumber,
     Klaim,
 )
-from store import Repo
+from store import Repo, TautanBukti, tautan_dari_hasil_rag, tautan_dari_kandidat
 from store.seed import muat_klaim, seed_kalau_kosong, seed_ulang
 
 
@@ -129,3 +131,121 @@ def test_seed_idempoten(repo):
     assert len(muat_klaim(repo)) == jumlah       # upsert, bukan duplikat
     assert len(repo.daftar_klaim()) == jumlah
     assert seed_ulang(repo) == jumlah
+
+
+def test_simpan_dan_query_netra_klaim_bukti(repo):
+    repo.simpan_klaim(klaim("k1"))
+    repo.simpan_klaim(klaim("k2"))
+
+    url_yt_pendek = "https://youtu.be/AbC123xyZ?si=share1"
+    url_yt_panjang = "https://www.youtube.com/watch?v=AbC123xyZ&feature=share"
+    rag_item_1 = HasilCariKorpus(
+        chunk_id=11,
+        doc_id=doc_id_dari_url(url_yt_pendek),
+        judul="Latihan Gabungan 2021",
+        url=url_yt_pendek,
+        jenis_sumber="media",
+        cakupan="temuan",
+        jenis_konten="video",
+        kutipan="Potongan pidato latihan 2021.",
+        skor_kemiripan=0.72,
+        metode_cari="vector",
+    )
+    rag_item_2 = HasilCariKorpus(
+        chunk_id=12,
+        doc_id=doc_id_dari_url(url_yt_pendek),
+        judul="Latihan Gabungan 2021",
+        url=url_yt_pendek,
+        jenis_sumber="media",
+        cakupan="temuan",
+        jenis_konten="video",
+        kutipan="Segmen lanjutan penjelasan komandan.",
+        skor_kemiripan=0.89,
+        metode_cari="vector",
+    )
+    kandidat_t1 = KandidatSumber(
+        url="https://tniad.mil.id/rilis-resmi/?utm_source=ig",
+        jenis_sumber="resmi",
+        metode="frame_match",
+        kemiripan=0.81,
+        skor=0.81,
+        cuplikan="01:12",
+        judul="Siaran Pers Resmi",
+    )
+
+    # Duplikat chunk_id=11 harus menyisakan skor tertinggi, sementara chunk 11 & 12 tetap terpisah
+    repo.simpan_bukti_klaim(
+        "k1",
+        [
+            tautan_dari_hasil_rag(rag_item_1),
+            tautan_dari_hasil_rag(rag_item_1.model_copy(update={"skor_kemiripan": 0.91})),
+            tautan_dari_hasil_rag(rag_item_2, peran="acuan_utama"),
+            tautan_dari_kandidat(kandidat_t1, peran="korroborasi"),
+        ],
+    )
+    daftar = repo.daftar_bukti_klaim("k1")
+    assert len(daftar) == 3
+    assert daftar[0].skor == pytest.approx(0.91)
+    assert [d.chunk_id for d in daftar] == [11, 12, None]
+    assert daftar[2].doc_id == doc_id_dari_url("https://tniad.mil.id/rilis-resmi")
+
+    # Tambah incremental (ganti=False) ke klaim k2 dengan URL varian -> query hoaks daur ulang ketemu k1 & k2
+    repo.simpan_bukti_klaim(
+        "k2",
+        [TautanBukti(tier="tier1", metode="keyword", url=url_yt_panjang, skor=0.65)],
+        ganti=False,
+    )
+    assert repo.klaim_memakai_dokumen(url_yt_pendek) == ["k1", "k2"]
+    assert repo.klaim_memakai_dokumen(doc_id_dari_url(url_yt_panjang)) == ["k1", "k2"]
+
+    with pytest.raises(store.TidakDitemukan):
+        repo.simpan_bukti_klaim("tidak-ada", [])
+
+    repo.hapus_semua()
+    assert repo.daftar_bukti_klaim("k1") == []
+
+
+def test_simpan_verifikasi_kelola_netra_klaim_bukti(repo):
+    url_hoaks = "https://www.tiktok.com/@akun/video/777?is_from_webapp=1"
+    url_asli = "https://www.tniad.mil.id/klarifikasi-resmi/?utm_source=x"
+    repo.simpan_klaim(klaim("v1", media_url=url_hoaks))
+
+    # 1. Backfill otomatis dari HasilVerifikasi mengabaikan media_url milik klaim viral sendiri
+    hv = HasilVerifikasi(
+        claim_id="v1",
+        status="terbukti_diubah",
+        sumber_utama=url_asli,
+        keyakinan=0.88,
+        metode=["frame_match"],
+        bukti=[
+            Bukti(jenis="metadata", url=url_asli, cuplikan="00:10", catatan="Sumber utama"),
+            Bukti(jenis="frame", url=url_hoaks, cuplikan="00:10", catatan="Cuplikan viral"),
+        ],
+        draf_klarifikasi=DrafKlarifikasi(kartu="k", pendek="p", whatsapp="w"),
+    )
+    repo.simpan_verifikasi(hv)
+    bukti_v1 = repo.daftar_bukti_klaim("v1")
+    assert len(bukti_v1) == 1
+    assert bukti_v1[0].doc_id == doc_id_dari_url(url_asli)
+    assert bukti_v1[0].peran == "acuan_utama"
+
+    # 2. Jika tautan kaya chunk_id sudah tersimpan, simpan_verifikasi tanpa tautan_bukti tidak menimpanya
+    tautan_rag = TautanBukti(
+        doc_id="dok_resmi_1",
+        chunk_id=42,
+        tier="tier2_rag",
+        metode="vector",
+        peran="acuan_utama",
+        skor=0.95,
+        url=url_asli,
+    )
+    repo.simpan_bukti_klaim("v1", [tautan_rag], ganti=True)
+    repo.simpan_verifikasi(hv)
+    assert [b.chunk_id for b in repo.daftar_bukti_klaim("v1")] == [42]
+
+    # 3. Jika tautan_bukti diberikan eksplisit saat simpan_verifikasi, relasi diganti bersih
+    tautan_baru = TautanBukti(tier="tier1", metode="ocr", peran="pembanding", skor=0.77, url="https://antaranews.com/berita/1")
+    repo.simpan_verifikasi(hv, tautan_bukti=[tautan_baru])
+    hasil_akhir = repo.daftar_bukti_klaim("v1")
+    assert len(hasil_akhir) == 1
+    assert hasil_akhir[0].doc_id == doc_id_dari_url("https://antaranews.com/berita/1")

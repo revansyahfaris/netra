@@ -6,20 +6,29 @@ bertahan setelah restart dan bisa diperiksa ulang.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from schemas import (
     HasilPencarian,
     HasilVerifikasi,
+    KandidatSumber,
     Klaim,
     KlaimLengkap,
     RiwayatAksi,
 )
 
-from .models import AuditRow, KlaimRow, PencarianRow, VerifikasiRow
+from url_kanonis import doc_id_dari_url, normalisasi_url
+
+from .models import AuditRow, KlaimBuktiRow, KlaimRow, PencarianRow, VerifikasiRow
+
+if TYPE_CHECKING:
+    from ai.rag import HasilCariKorpus
 
 
 class TidakDitemukan(Exception):
@@ -28,6 +37,126 @@ class TidakDitemukan(Exception):
 
 class TidakBoleh(Exception):
     """Aksi tidak sah menurut state machine."""
+
+
+TierBukti = Literal["tier1", "tier2_rag", "manual"]
+PeranBukti = Literal["acuan_utama", "pembanding", "korroborasi"]
+
+
+class TautanBukti(BaseModel):
+    """Tautan relasional antara klaim dan dokumen/chunk bukti pada `netra_klaim_bukti`."""
+
+    doc_id: str | None = None
+    chunk_id: int | None = None
+    tier: TierBukti = "tier2_rag"
+    metode: str = "rag"
+    peran: PeranBukti = "pembanding"
+    skor: float = Field(default=0.0, ge=0.0, le=1.0)
+    url: str
+    url_kanonis: str | None = None
+    cuplikan: str | None = None
+    catatan: str | None = None
+    dibuat_pada: datetime | None = None
+
+    @model_validator(mode="after")
+    def _isi_identitas_url(self) -> TautanBukti:
+        self.url = self.url.strip()
+        if not self.url_kanonis or not self.url_kanonis.strip():
+            self.url_kanonis = normalisasi_url(self.url)
+        if not self.url_kanonis:
+            raise ValueError("URL bukti tidak boleh kosong")
+        if not self.doc_id or not self.doc_id.strip():
+            self.doc_id = doc_id_dari_url(self.url_kanonis)
+        else:
+            self.doc_id = self.doc_id.strip()
+        return self
+
+
+def tautan_dari_hasil_rag(
+    item: HasilCariKorpus,
+    peran: PeranBukti = "pembanding",
+) -> TautanBukti:
+    """Konversi hasil temuan RAG (`HasilCariKorpus`) menjadi `TautanBukti`."""
+    cuplikan = item.kutipan[:300] if item.kutipan else None
+    return TautanBukti(
+        doc_id=item.doc_id,
+        chunk_id=item.chunk_id,
+        tier="tier2_rag",
+        metode=item.metode_cari,
+        peran=peran,
+        skor=item.skor_kemiripan,
+        url=item.url,
+        cuplikan=cuplikan,
+        catatan=f"Cakupan {item.cakupan} ({item.jenis_konten})",
+    )
+
+
+def tautan_dari_kandidat(
+    kandidat: KandidatSumber,
+    peran: PeranBukti = "pembanding",
+) -> TautanBukti:
+    """Konversi `KandidatSumber` Tier-1 menjadi `TautanBukti` dengan `doc_id` deterministik."""
+    return TautanBukti(
+        tier="tier1",
+        metode=kandidat.metode,
+        peran=peran,
+        skor=float(kandidat.skor if kandidat.skor is not None else kandidat.kemiripan),
+        url=str(kandidat.url),
+        cuplikan=kandidat.cuplikan,
+        catatan=kandidat.judul,
+    )
+
+
+def _tautan_dari_verifikasi(
+    hasil: HasilVerifikasi,
+    media_url_klaim: str | None = None,
+) -> list[TautanBukti]:
+    kanonis_klaim = normalisasi_url(media_url_klaim) if media_url_klaim else ""
+    kanonis_utama = normalisasi_url(str(hasil.sumber_utama)) if hasil.sumber_utama else ""
+    tier_default: TierBukti = (
+        "tier2_rag" if "rag" in hasil.metode else ("manual" if hasil.metode == ["manual"] else "tier1")
+    )
+
+    keluar: list[TautanBukti] = []
+    for b in hasil.bukti:
+        url_str = str(b.url)
+        kanonis_b = normalisasi_url(url_str)
+        if not kanonis_b or (kanonis_klaim and kanonis_b == kanonis_klaim):
+            continue
+        peran: PeranBukti = "acuan_utama" if kanonis_utama and kanonis_b == kanonis_utama else "pembanding"
+        keluar.append(
+            TautanBukti(
+                tier=tier_default,
+                metode=b.jenis,
+                peran=peran,
+                skor=float(hasil.keyakinan or 0.0),
+                url=url_str,
+                url_kanonis=kanonis_b,
+                cuplikan=b.cuplikan,
+                catatan=b.catatan,
+            )
+        )
+    return keluar
+
+
+def _kunci_tautan(item: TautanBukti) -> tuple[int | None, str | None, str]:
+    return (item.chunk_id, item.doc_id, item.tier)
+
+
+def _row_ke_tautan(row: KlaimBuktiRow) -> TautanBukti:
+    return TautanBukti(
+        doc_id=row.doc_id,
+        chunk_id=row.chunk_id,
+        tier=row.tier,  # type: ignore[arg-type]
+        metode=row.metode,
+        peran=row.peran,  # type: ignore[arg-type]
+        skor=row.skor,
+        url=row.url,
+        url_kanonis=row.url_kanonis,
+        cuplikan=row.cuplikan,
+        catatan=row.catatan,
+        dibuat_pada=row.dibuat_pada,
+    )
 
 
 def _sekarang() -> datetime:
@@ -121,9 +250,120 @@ class Repo:
                 return None
             return HasilPencarian.model_validate(row.data), row.proses or {}
 
+    def _tulis_bukti_klaim(
+        self,
+        ses: Session,
+        claim_id: str,
+        bukti: Sequence[TautanBukti],
+        ganti: bool,
+        now: datetime,
+    ) -> list[TautanBukti]:
+        dedup: dict[tuple[int | None, str | None, str], TautanBukti] = {}
+        for item in bukti:
+            kunci = _kunci_tautan(item)
+            lama = dedup.get(kunci)
+            if lama is None or item.skor >= lama.skor:
+                dedup[kunci] = item
+
+        if ganti:
+            ses.execute(delete(KlaimBuktiRow).where(KlaimBuktiRow.claim_id == claim_id))
+            eksisting: dict[tuple[int | None, str | None, str], KlaimBuktiRow] = {}
+        else:
+            baris_lama = list(
+                ses.scalars(select(KlaimBuktiRow).where(KlaimBuktiRow.claim_id == claim_id))
+            )
+            eksisting = {(r.chunk_id, r.doc_id, r.tier): r for r in baris_lama}
+
+        hasil: list[TautanBukti] = []
+        for kunci, item in dedup.items():
+            waktu_item = item.dibuat_pada or now
+            row_eksisting = eksisting.get(kunci)
+            if row_eksisting is not None:
+                row_eksisting.metode = item.metode
+                row_eksisting.peran = item.peran
+                row_eksisting.skor = item.skor
+                row_eksisting.url = item.url
+                row_eksisting.url_kanonis = item.url_kanonis
+                row_eksisting.cuplikan = item.cuplikan
+                row_eksisting.catatan = item.catatan
+                row_eksisting.dibuat_pada = waktu_item
+                hasil.append(_row_ke_tautan(row_eksisting))
+            else:
+                baru = KlaimBuktiRow(
+                    claim_id=claim_id,
+                    doc_id=item.doc_id,
+                    chunk_id=item.chunk_id,
+                    tier=item.tier,
+                    metode=item.metode,
+                    peran=item.peran,
+                    skor=item.skor,
+                    url=item.url,
+                    url_kanonis=item.url_kanonis,
+                    cuplikan=item.cuplikan,
+                    catatan=item.catatan,
+                    dibuat_pada=waktu_item,
+                )
+                ses.add(baru)
+                hasil.append(_row_ke_tautan(baru))
+        return hasil
+
+    def simpan_bukti_klaim(
+        self,
+        claim_id: str,
+        bukti: Sequence[TautanBukti],
+        ganti: bool = True,
+        aktor: str | None = None,
+    ) -> list[TautanBukti]:
+        """Simpan relasi klaim <-> dokumen/chunk bukti ke `netra_klaim_bukti`."""
+        now = _sekarang()
+        with self._s() as ses:
+            if ses.get(KlaimRow, claim_id) is None:
+                raise TidakDitemukan(f"Klaim {claim_id} tidak ditemukan")
+            tersimpan = self._tulis_bukti_klaim(ses, claim_id, bukti, ganti=ganti, now=now)
+            self._catat(
+                ses,
+                claim_id,
+                "bukti_ditautkan",
+                aktor,
+                {"jumlah": len(tersimpan), "ganti": ganti},
+            )
+            ses.commit()
+        return tersimpan
+
+    def daftar_bukti_klaim(self, claim_id: str) -> list[TautanBukti]:
+        """Ambil daftar tautan bukti relasional untuk satu klaim (urut skor tertinggi)."""
+        with self._s() as ses:
+            q = (
+                select(KlaimBuktiRow)
+                .where(KlaimBuktiRow.claim_id == claim_id)
+                .order_by(KlaimBuktiRow.skor.desc(), KlaimBuktiRow.id.asc())
+            )
+            return [_row_ke_tautan(r) for r in ses.scalars(q)]
+
+    def klaim_memakai_dokumen(self, doc_id_atau_url: str) -> list[str]:
+        """Cari daftar `claim_id` yang merujuk pada `doc_id` atau URL sumber tertentu."""
+        target = doc_id_atau_url.strip()
+        if not target:
+            return []
+        if target.lower().startswith(("http://", "https://")):
+            target = doc_id_dari_url(target)
+        with self._s() as ses:
+            q = (
+                select(KlaimBuktiRow.claim_id)
+                .where(KlaimBuktiRow.doc_id == target)
+                .distinct()
+                .order_by(KlaimBuktiRow.claim_id)
+            )
+            return list(ses.scalars(q))
+
     # ---------- verifikasi ----------
 
-    def simpan_verifikasi(self, hasil: HasilVerifikasi, aktor: str | None = None) -> HasilVerifikasi:
+    def simpan_verifikasi(
+        self,
+        hasil: HasilVerifikasi,
+        aktor: str | None = None,
+        tautan_bukti: Sequence[TautanBukti] | None = None,
+    ) -> HasilVerifikasi:
         now = _sekarang()
         hasil = hasil.model_copy(update={"waktu_verifikasi": hasil.waktu_verifikasi or now})
         with self._s() as ses:
@@ -143,6 +383,22 @@ class Repo:
                 k = k.model_copy(update={"status_pipeline": baru})
                 krow.data = k.model_dump(mode="json")
                 krow.status_pipeline = baru
+            if tautan_bukti is not None:
+                self._tulis_bukti_klaim(ses, hasil.claim_id, tautan_bukti, ganti=True, now=now)
+            elif hasil.bukti:
+                sudah_ada = (
+                    ses.scalar(
+                        select(func.count())
+                        .select_from(KlaimBuktiRow)
+                        .where(KlaimBuktiRow.claim_id == hasil.claim_id)
+                    )
+                    or 0
+                )
+                if not sudah_ada:
+                    media_url_klaim = (krow.data or {}).get("media_url") if krow else None
+                    turunan = _tautan_dari_verifikasi(hasil, media_url_klaim=media_url_klaim)
+                    if turunan:
+                        self._tulis_bukti_klaim(ses, hasil.claim_id, turunan, ganti=False, now=now)
             self._catat(ses, hasil.claim_id, "verifikasi", aktor,
                         {"status": hasil.status, "perlu_eskalasi": hasil.perlu_eskalasi})
             ses.commit()
@@ -257,7 +513,7 @@ class Repo:
 
     def hapus_semua(self) -> None:
         with self._s() as ses:
-            for model in (AuditRow, VerifikasiRow, PencarianRow, KlaimRow):
+            for model in (AuditRow, KlaimBuktiRow, VerifikasiRow, PencarianRow, KlaimRow):
                 ses.query(model).delete()
             ses.commit()
 

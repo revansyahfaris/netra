@@ -10,6 +10,7 @@ import hashlib
 import html
 import logging
 import re
+from collections.abc import Sequence
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Literal
@@ -69,7 +70,26 @@ class SinyalSumberAcuan(BaseModel):
     stt_segmen: list[SegmenTranskrip] = Field(default_factory=list)
     sumber_stt: str = "kosong"
     ocr: HasilOCR = Field(default_factory=HasilOCR)
+    keyframes_lokal: list[str] = Field(default_factory=list)
     catatan: str | None = None
+
+
+def pilih_keyframes_wakilan(keyframes: Sequence[tuple[float, Path]], maks: int = 3) -> list[str]:
+    """Ambil maksimal `maks` path keyframe yang tersebar merata (awal-tengah-akhir)."""
+    semua = [Path(p) for _, p in keyframes]
+    ada = [p for p in semua if p.exists()] or semua
+    if not ada or maks <= 0:
+        return []
+    if len(ada) <= maks:
+        return [str(p) for p in ada]
+    if maks == 1:
+        return [str(ada[len(ada) // 2])]
+    indeks: list[int] = []
+    for i in range(maks):
+        idx = round(i * (len(ada) - 1) / (maks - 1))
+        if idx not in indeks:
+            indeks.append(idx)
+    return [str(ada[i]) for i in indeks]
 
 
 class _HtmlEkstraktor(HTMLParser):
@@ -357,6 +377,7 @@ def _ekstrak_kandidat_video(
         stt_segmen=hasil_stt.segmen,
         sumber_stt=hasil_stt.sumber_stt,
         ocr=hasil_ocr,
+        keyframes_lokal=pilih_keyframes_wakilan(keyframes, maks=3),
         catatan=catatan,
     )
 

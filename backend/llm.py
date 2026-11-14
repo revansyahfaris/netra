@@ -86,6 +86,7 @@ def _kirim_generate(
     timeout: float | None = None,
     model: str | None = None,
     thinking: str | None = "low",
+    instruksi_sistem: str | None = None,
 ) -> dict | list:
     if not config.llm_aktif():
         raise LLMError("GEMINI_API_KEY belum diisi")
@@ -97,7 +98,9 @@ def _kirim_generate(
         gen["responseSchema"] = skema
     if thinking:
         gen["thinkingConfig"] = {"thinkingLevel": thinking}
-    body = {"contents": [{"role": "user", "parts": parts}], "generationConfig": gen}
+    body: dict = {"contents": [{"role": "user", "parts": parts}], "generationConfig": gen}
+    if instruksi_sistem:
+        body["systemInstruction"] = {"parts": [{"text": instruksi_sistem}]}
     model_id = model or config.GEMINI_MODEL
     batas = timeout if timeout is not None else config.HTTP_TIMEOUT
 
@@ -127,6 +130,7 @@ def tanya_json(
     thinking: str | None = "low",
     skema: dict | None = None,
     timeout: float | None = None,
+    instruksi_sistem: str | None = None,
 ) -> dict | list:
     """Kirim prompt teks dan minta jawaban berupa JSON. Melempar LLMError kalau gagal.
 
@@ -135,7 +139,7 @@ def tanya_json(
     thinking: tingkat "berpikir" model seri 3 (minimal / low / medium / high, None = default model).
     """
     return _kirim_generate([part_teks(prompt)], suhu=suhu, skema=skema, timeout=timeout,
-                           model=model, thinking=thinking)
+                           model=model, thinking=thinking, instruksi_sistem=instruksi_sistem)
 
 
 def tanya_multimodal_json(
@@ -145,9 +149,11 @@ def tanya_multimodal_json(
     timeout: float | None = None,
     model: str | None = None,
     thinking: str | None = "low",
+    instruksi_sistem: str | None = None,
 ) -> dict | list:
     """Kirim kombinasi teks + gambar/audio/video dan minta structured JSON.
     Default memakai config.GEMINI_MODEL_VERIFIKASI (tugas OCR/perbandingan)."""
     batas = timeout if timeout is not None else max(config.HTTP_TIMEOUT, 60.0)
     return _kirim_generate(parts, suhu=suhu, skema=skema, timeout=batas,
-                           model=model or config.GEMINI_MODEL_VERIFIKASI, thinking=thinking)
+                           model=model or config.GEMINI_MODEL_VERIFIKASI, thinking=thinking,
+                           instruksi_sistem=instruksi_sistem)

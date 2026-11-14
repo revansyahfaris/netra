@@ -64,6 +64,7 @@ def cari_google(query: str, kutipan: bool = False, jumlah: int = 8) -> list[Temu
                 tanggal_unggah=dates.parse(item.get("date")),
                 cuplikan=snippet[:200] or None,
                 ada_watermark=sources.perkiraan_watermark(url),
+                asal="google",
             )
         )
     return hasil
@@ -88,29 +89,44 @@ def cari_youtube(query: str, jumlah: int = 5) -> list[Temuan]:
                 tanggal_unggah=dates.parse(item.get("published_date")),
                 uploader=kanal,
                 ada_watermark=sources.perkiraan_watermark(url),
+                asal="youtube",
             )
         )
     return hasil
 
 
-def reverse_image(image_url: str, jumlah: int = 8) -> list[Temuan]:
-    """Google Lens. Gambar harus bisa diakses publik lewat URL."""
+# Hasil Lens dari keyframe video baru petunjuk visual: dibatasi di bawah ambang frame match kuat (0.75)
+# sampai benar-benar lolos pencocokan pHash/audio lokal.
+KEMIRIPAN_MAKS_LENS_VIDEO = 0.7
+
+
+def reverse_image(image_url: str, jumlah: int = 8, untuk_video: bool = False) -> list[Temuan]:
+    """Google Lens. Gambar harus bisa diakses publik lewat URL.
+
+    untuk_video=True: gambar adalah keyframe video viral. Hasilnya ditandai `dari_lens` dengan
+    metode "keyword" (petunjuk, bukan bukti), supaya routing tidak menganggapnya frame match
+    terverifikasi. Kandidat video dari Lens tetap diprioritaskan untuk dicek pHash.
+    """
     data = _serpapi({"engine": "google_lens", "url": image_url, "hl": "id", "country": "id"})
     hasil = []
     for i, item in enumerate(data.get("visual_matches", [])[:jumlah]):
         url = item.get("link")
         if not _url_layak(url):
             continue
+        # Lens tidak memberi skor; perkirakan dari urutan hasil
+        perkiraan = round(max(0.9 - 0.05 * i, 0.5), 2)
         hasil.append(
             Temuan(
                 url=url,
-                metode="frame_match",
-                # Lens tidak memberi skor; perkirakan dari urutan hasil
-                kemiripan=round(max(0.9 - 0.05 * i, 0.5), 2),
+                metode="keyword" if untuk_video else "frame_match",
+                kemiripan=min(perkiraan, KEMIRIPAN_MAKS_LENS_VIDEO) if untuk_video else perkiraan,
                 jenis_sumber=sources.jenis_sumber(url, item.get("source")),
                 judul=item.get("title", ""),
                 tanggal_unggah=dates.parse(item.get("date")),
                 ada_watermark=sources.perkiraan_watermark(url),
+                uploader=item.get("source"),
+                asal="lens",
+                dari_lens=True,
             )
         )
     return hasil
