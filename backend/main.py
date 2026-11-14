@@ -168,9 +168,10 @@ def tambah_klaim(klaim: Klaim):
 def antrean(
     status: str | None = Query(None, description="Filter status_pipeline"),
     level: str | None = Query(None, description="tinggi / sedang / rendah"),
+    ringkas: bool = Query(False, description="true: tanpa pencarian dan riwayat, untuk daftar antrean"),
 ):
     """Klaim terurut dari prioritas tertinggi, lengkap dengan status verifikasi."""
-    return REPO.daftar_lengkap(status=status, level=level)
+    return REPO.daftar_lengkap(status=status, level=level, ringkas=ringkas)
 
 
 @app.get("/klaim/{claim_id}", response_model=KlaimLengkap, tags=["prioritas"])

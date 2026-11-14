@@ -203,7 +203,8 @@ export const api = {
   health: () => minta<Record<string, unknown>>("/health"),
   statistik: () => minta<Statistik>("/statistik"),
   antrean: (params?: { status?: string; level?: string }) => {
-    const q = new URLSearchParams();
+    // ringkas: daftar antrean tidak butuh data pencarian dan riwayat, jadi respons jauh lebih kecil
+    const q = new URLSearchParams({ ringkas: "true" });
     if (params?.status) q.set("status", params.status);
     if (params?.level) q.set("level", params.level);
     const s = q.toString();

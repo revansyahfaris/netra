@@ -281,3 +281,40 @@ def test_migrasi_postgres_hapus_fk_doc_id_dan_filter_chunk(monkeypatch):
     store_db._migrasi_postgres(FakePgEngine())
     assert len(dieksekusi) == 1
     assert "DROP CONSTRAINT IF EXISTS fk_netra_klaim_bukti_doc_id" in dieksekusi[0]
+
+def test_daftar_lengkap_batch_sama_dengan_per_klaim_dan_query_tetap(repo):
+    """Antrean dimuat dengan jumlah query tetap, hasilnya identik dengan ambil per klaim."""
+    from sqlalchemy import event
+
+    seed_ulang(repo)
+    per_klaim = [repo.ambil_lengkap(k.claim_id) for k in repo.daftar_klaim()]
+    assert len(per_klaim) >= 3
+
+    mesin = store.db.get_engine()
+    hitung = {"n": 0}
+
+    def catat(*_a, **_k):
+        hitung["n"] += 1
+
+    event.listen(mesin, "before_cursor_execute", catat)
+    try:
+        batch = repo.daftar_lengkap()
+        n_lengkap = hitung["n"]
+        hitung["n"] = 0
+        ringkas = repo.daftar_lengkap(ringkas=True)
+        n_ringkas = hitung["n"]
+    finally:
+        event.remove(mesin, "before_cursor_execute", catat)
+
+    assert [b.model_dump() for b in batch] == [p.model_dump() for p in per_klaim]
+    assert n_lengkap <= 5
+    assert n_ringkas <= 3
+    assert all(r.pencarian is None and r.riwayat == [] for r in ringkas)
+    assert [r.verifikasi for r in ringkas] == [p.verifikasi for p in per_klaim]
+
+
+def test_daftar_lengkap_filter_level_dan_kosong(repo):
+    assert repo.daftar_lengkap() == []
+    repo.simpan_klaim(klaim("a", level="tinggi"))
+    repo.simpan_klaim(klaim("b", level="rendah", skor_prioritas=0.2))
+    assert [x.klaim.claim_id for x in repo.daftar_lengkap(level="rendah")] == ["b"]

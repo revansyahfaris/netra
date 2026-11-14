@@ -513,8 +513,54 @@ class Repo:
             riwayat=self.riwayat(claim_id),
         )
 
-    def daftar_lengkap(self, status: str | None = None, level: str | None = None) -> list[KlaimLengkap]:
-        return [self.ambil_lengkap(k.claim_id) for k in self.daftar_klaim(status, level)]
+    def daftar_lengkap(self, status: str | None = None, level: str | None = None,
+                       ringkas: bool = False) -> list[KlaimLengkap]:
+        """Semua klaim lengkap dalam satu sesi dan paling banyak 4 query.
+
+        Sebelumnya tiap klaim membuka 4 sesi terpisah (klaim, pencarian, verifikasi, riwayat).
+        Dengan Postgres jarak jauh (Neon) itu berarti ratusan perjalanan bolak-balik per muat antrean.
+        ringkas=True melewatkan pencarian dan riwayat, yang tidak dipakai daftar antrean.
+        """
+        with self._s() as ses:
+            q = select(KlaimRow)
+            if status:
+                q = q.where(KlaimRow.status_pipeline == status)
+            q = q.order_by(KlaimRow.skor_prioritas.desc(), KlaimRow.tanggal_ditemukan.desc())
+            daftar = [Klaim.model_validate(r.data) for r in ses.scalars(q)]
+            if level:
+                daftar = [k for k in daftar if k.level == level]
+            if not daftar:
+                return []
+            ids = [k.claim_id for k in daftar]
+
+            verifikasi = {
+                r.claim_id: HasilVerifikasi.model_validate(r.data)
+                for r in ses.scalars(select(VerifikasiRow).where(VerifikasiRow.claim_id.in_(ids)))
+            }
+            pencarian: dict[str, tuple[HasilPencarian, dict]] = {}
+            riwayat: dict[str, list[RiwayatAksi]] = {}
+            if not ringkas:
+                pencarian = {
+                    r.claim_id: (HasilPencarian.model_validate(r.data), r.proses or {})
+                    for r in ses.scalars(select(PencarianRow).where(PencarianRow.claim_id.in_(ids)))
+                }
+                qa = (select(AuditRow).where(AuditRow.claim_id.in_(ids))
+                      .order_by(AuditRow.waktu, AuditRow.id))
+                for r in ses.scalars(qa):
+                    riwayat.setdefault(r.claim_id, []).append(
+                        RiwayatAksi(aksi=r.aksi, aktor=r.aktor, waktu=r.waktu, detail=r.detail or {}))
+
+        hasil = []
+        for k in daftar:
+            p = pencarian.get(k.claim_id)
+            hasil.append(KlaimLengkap(
+                klaim=k,
+                pencarian=p[0] if p else None,
+                proses_pencarian=p[1] if p else None,
+                verifikasi=verifikasi.get(k.claim_id),
+                riwayat=riwayat.get(k.claim_id, []),
+            ))
+        return hasil
 
     # ---------- statistik & utilitas ----------
 
