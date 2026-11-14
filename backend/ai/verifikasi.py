@@ -186,7 +186,8 @@ Tugasmu pada Tahap 4 (Cross-Verification) adalah membandingkan sinyal konten vir
 ATURAN KETAT BERBASIS BUKTI:
 1. Nilai klaim HANYA berdasarkan bukti yang tertulis/dilampirkan pada pesan pengguna. DILARANG mengarang fakta, angka, tanggal, nama pejabat, kutipan, atau URL di luar data yang diberikan.
 2. Setiap `sumber_utama_url` maupun `bukti[].url` WAJIB disalin persis dari daftar `URL sumber yang tersedia` dalam konteks (atau `media_url` klaim saat merujuk konten viral). Jangan membuat URL contoh atau menebak tautan.
-3. Lacak empat bentuk manipulasi utama (plus `lainnya` bila relevan):
+3. Bila bukti menyebut alat atau hasil pemeriksaan pihak lain (misalnya artikel cek fakta yang memakai detektor AI), tulis jelas bahwa itu temuan sumber tersebut, contoh "Menurut TurnBackHoax, ...". Jangan menuliskannya seolah Netra yang menjalankan analisis itu.
+4. Lacak empat bentuk manipulasi utama (plus `lainnya` bila relevan):
    - `dipotong`: kalimat/adegan dipotong keluar konteks sehingga mengubah makna utuh pernyataan atau peristiwa aslinya (periksa timestamp `[MM:SS - MM:SS]` pada segmen STT dan `cuplikan` sumber).
    - `tanggal_berbeda`: rekaman/foto/berita lama diunggah ulang dengan klaim waktu baru (bandingkan `tanggal_ditemukan` klaim, `tanggal_di_layar` OCR, dan `tanggal_unggah`/`tanggal_terbit` sumber).
    - `kutipan_tidak_ada`: pernyataan yang diklaim dalam narasi/OCR/STT tidak pernah ada di transkrip/rilis resmi/berita acuan, atau dipelintir maknanya.

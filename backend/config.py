@@ -39,6 +39,10 @@ STT_MODEL = os.getenv("STT_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
 SEED_KALAU_KOSONG = os.getenv("SEED_KALAU_KOSONG", "1") != "0"
 # Izinkan POST /seed (reset data demo). Matikan saat dipakai sungguhan.
 IZINKAN_SEED = os.getenv("IZINKAN_SEED", "1") != "0"
+# Pengaman link publik: batas proses live (pencarian/verifikasi berbayar) per hari, 0 = tanpa batas.
+BATAS_PROSES_HARIAN = int(os.getenv("BATAS_PROSES_HARIAN", "0") or 0)
+# Jeda minimal sebelum klaim yang sama boleh diproses ulang (menit), 0 = tanpa jeda.
+JEDA_PROSES_ULANG_MENIT = int(os.getenv("JEDA_PROSES_ULANG_MENIT", "0") or 0)
 # Ikut muat kasus nyata (data/kasus_nyata) saat seed. Menyebut peristiwa & pejabat nyata.
 DEMO_KASUS_NYATA = os.getenv("DEMO_KASUS_NYATA", "0") == "1"
 

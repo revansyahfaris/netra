@@ -79,6 +79,53 @@ def _ambil_klaim(claim_id: str) -> Klaim:
     return k
 
 
+# ---------- Pengaman biaya untuk link publik ----------
+_KUOTA = {"tanggal": None, "jumlah": 0}
+_TERAKHIR_DIPROSES: dict[str, datetime] = {}
+_LOCK_KUOTA = threading.Lock()
+
+
+def _sisa_kuota() -> int | None:
+    if config.BATAS_PROSES_HARIAN <= 0:
+        return None
+    hari_ini = datetime.now().date()
+    if _KUOTA["tanggal"] != hari_ini:
+        return config.BATAS_PROSES_HARIAN
+    return max(0, config.BATAS_PROSES_HARIAN - _KUOTA["jumlah"])
+
+
+def _pakai_kuota(claim_id: str) -> None:
+    """Tolak proses live baru kalau kuota harian habis atau klaim baru saja diproses.
+
+    Hanya berlaku di mode live (memanggil API berbayar). Hasil tersimpan tetap bisa dibuka.
+    """
+    if not (config.llm_aktif() or config.search_aktif()):
+        return
+    sekarang = datetime.now()
+    with _LOCK_KUOTA:
+        if config.JEDA_PROSES_ULANG_MENIT > 0:
+            terakhir = _TERAKHIR_DIPROSES.get(claim_id)
+            if terakhir is not None:
+                sisa_menit = config.JEDA_PROSES_ULANG_MENIT - (sekarang - terakhir).total_seconds() / 60
+                if sisa_menit > 0:
+                    raise HTTPException(
+                        429,
+                        f"Klaim ini baru saja diproses. Hasil terakhir tetap bisa dilihat; "
+                        f"proses ulang tersedia lagi dalam {int(sisa_menit) + 1} menit.",
+                    )
+        if config.BATAS_PROSES_HARIAN > 0:
+            if _KUOTA["tanggal"] != sekarang.date():
+                _KUOTA.update(tanggal=sekarang.date(), jumlah=0)
+            if _KUOTA["jumlah"] >= config.BATAS_PROSES_HARIAN:
+                raise HTTPException(
+                    429,
+                    "Batas proses live untuk demo publik hari ini sudah tercapai. "
+                    "Hasil yang sudah tersimpan tetap bisa dibuka.",
+                )
+            _KUOTA["jumlah"] += 1
+        _TERAKHIR_DIPROSES[claim_id] = sekarang
+
+
 @app.get("/health")
 def health():
     return {
@@ -91,6 +138,9 @@ def health():
         "jit_tier2": config.JIT_TIER2,
         "media_publik": media_publik.aktif(),
         "database": db_mode(),
+        "seed_diizinkan": config.IZINKAN_SEED,
+        "batas_proses_harian": config.BATAS_PROSES_HARIAN or None,
+        "sisa_proses_hari_ini": _sisa_kuota(),
     }
 
 
@@ -183,6 +233,7 @@ def _jalankan_pencarian_internal(
 def cari(claim_id: str, req: PermintaanCari | None = None):
     """Cari kandidat sumber asli, lalu urutkan dari yang paling mungkin asli."""
     k = _ambil_klaim(claim_id)
+    _pakai_kuota(claim_id)
     hasil, _, _ = _jalankan_pencarian_internal(k, (req.url_manual if req else []))
     return hasil
 
@@ -378,6 +429,7 @@ def verifikasi(claim_id: str):
     if tersimpan is None:
         raise HTTPException(400, "Jalankan /cari dulu untuk klaim ini")
     pencarian, proses = tersimpan
+    _pakai_kuota(f"verifikasi:{claim_id}")
     hasil, tautan = jalankan_verifikasi_lengkap(k, pencarian, proses=proses)
     return REPO.simpan_verifikasi(hasil, aktor="api", tautan_bukti=tautan)
 
@@ -497,6 +549,7 @@ def _jalankan_job_pipeline(claim_id: str, url_manual: list[str]) -> None:
 def pipeline(claim_id: str, req: PermintaanCari | None = None):
     """Cari sumber lalu verifikasi dalam satu panggilan sinkron."""
     k = _ambil_klaim(claim_id)
+    _pakai_kuota(claim_id)
     return _jalankan_pipeline_sinkron(k, (req.url_manual if req else []))
 
 
@@ -517,6 +570,7 @@ def antre_pipeline(
         aktif = _PEKERJAAN_PIPELINE.get(claim_id)
         if aktif and aktif.status_kerja in ("antre", "berjalan"):
             return aktif
+    _pakai_kuota(claim_id)
     status_awal = _set_status_kerja(
         claim_id,
         status_kerja="antre",

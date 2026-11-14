@@ -53,7 +53,7 @@ export const LABEL_PERUBAHAN: Record<string, string> = {
   tanggal_berbeda: "Tanggal digeser",
   kutipan_tidak_ada: "Kutipan tidak ada di sumber",
   konteks_berbeda: "Konteks berbeda",
-  lainnya: "Perubahan lain",
+  lainnya: "Manipulasi lain",
 };
 
 export const LABEL_METODE: Record<string, string> = {

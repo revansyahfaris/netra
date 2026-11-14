@@ -1,12 +1,87 @@
 # Netra
 
+**Netra tidak menebak hoaks. Netra membuktikannya.**
+
 Sistem pendukung Dinas Penerangan TNI AD untuk **memverifikasi dan mengklarifikasi konten viral yang dimanipulasi**.
-Netra tidak mendeteksi hoaks (memakai sistem deteksi yang sudah ada). Netra melacak **sumber asli** sebuah konten,
-membuktikan apa yang diubah, lalu menyiapkan klarifikasi yang **disetujui petugas** sebelum tayang.
+Deteksi sudah dikerjakan sistem yang ada. Netra mengambil alih setelahnya: melacak **sumber asli**,
+membuktikan **apa yang diubah**, lalu menyiapkan klarifikasi yang **disetujui petugas** sebelum tayang.
 
 ```
 Deteksi (sistem yang ada) → Prioritas → Verifikasi → Klarifikasi → Persetujuan manusia
 ```
+
+| | |
+|---|---|
+| Demo | https://netra-app.tokorejeki.my.id |
+| API (Swagger) | https://netra-app.tokorejeki.my.id/api/docs |
+| Video presentasi | _(tautan menyusul)_ |
+| Slide | _(tautan menyusul)_ |
+
+Tim: Muhammad Faris Revansyah (prioritas, pencarian sumber, API), Farrel Adhi Pratama (pipeline data,
+dashboard), Adriel Christofer Widya (lapisan AI: STT, OCR, RAG, verifikasi silang). Teknik Komputer,
+Universitas Diponegoro.
+
+## Untuk panelis: coba dalam 3 menit
+
+1. Buka **Demo**. Antrean sudah berisi klaim yang diurutkan menurut prioritas.
+2. Buka salah satu kasus berikut dan lihat kandidat sumber asli, rincian skor, dan paket bukti:
+
+   | Kasus | Yang diperlihatkan |
+   |---|---|
+   | `r001` Intan Jaya | Video lama (2021) diedarkan ulang dengan narasi baru. Sumber paling awal ditemukan. |
+   | `r002` Kapuspen | Kutipan pejabat dipelintir. Teks asli dibandingkan dengan narasi viral. |
+   | `c002` Kasad | Jalur formal: klaim dicek ke korpus rilis resmi, kutipan tidak pernah ada. |
+   | `c001b` | Kasus sulit: semua kandidat meragukan, jadi Netra **tidak memaksa** klarifikasi dan mengeskalasi ke petugas. |
+   | `c004` | Tidak ada sumber pendukung, hasilnya `tidak_ditemukan` + eskalasi. |
+
+3. Isi nama petugas, pilih **Setujui klarifikasi** atau **Tolak / minta perbaikan**, lalu buka **Lihat halaman bukti publik**.
+   Setiap keputusan tercatat di audit trail.
+
+Klaim baru bisa ditambahkan lewat **+ Tambah klaim** (teks klaim plus tautan media viralnya). Proses live
+memanggil layanan berbayar dan bisa memakan beberapa menit, jadi pada link publik prosesnya dibatasi
+(`BATAS_PROSES_HARIAN`, `JEDA_PROSES_ULANG_MENIT`). Hasil yang sudah tersimpan selalu bisa dibuka.
+
+## Kenapa Netra berbeda
+
+- **Membuktikan, bukan memberi skor "hoaks atau bukan".** Keluarannya sumber asli, bagian yang diubah,
+  dan bukti berpasangan (teks viral vs teks sumber, detik ke berapa potongan berasal).
+- **Dua jalur verifikasi.** Peristiwa formal dicek ke korpus rilis resmi (RAG). Konten informal dilacak
+  lewat mesin pencari, YouTube, Google Lens, lalu dibuktikan dengan pencocokan frame (perceptual hash)
+  dan pola audio.
+- **Jujur saat ragu.** Kalau sumber tertua pun meragukan atau bukti saling bertentangan, status menjadi
+  `belum_bisa_diverifikasi` dan dieskalasi, bukan dipaksakan.
+- **Manusia tetap memutuskan.** Tidak ada klarifikasi yang tayang tanpa persetujuan petugas.
+
+## Keamanan dan keandalan
+
+- **Tahan buzzer:** korroborasi dihitung per penerbit unik, kontribusi akun pribadi dibatasi, dan
+  hasil yang hanya mirip gambar tanpa membahas klaim tidak ikut menyumbang skor.
+- **Anti halusinasi:** LLM hanya boleh menyalin URL dari daftar sumber yang ditemukan, dan temuan pihak
+  lain (misalnya artikel cek fakta) wajib disebut sebagai temuan sumber tersebut.
+- **Audit trail** untuk setiap pencarian, verifikasi, dan keputusan petugas.
+- **Rahasia aman:** API key dikirim lewat header dan tidak tercetak di log; `.env` tidak masuk repo.
+- **Pengaman biaya** untuk link publik: kuota proses harian dan jeda proses ulang per klaim.
+
+## Evaluasi
+
+Semua kasus demo bisa diuji ulang dengan satu perintah, tanpa API key:
+
+```bash
+cd backend && python scripts/evaluasi.py --tulis ../docs/hasil-evaluasi.md
+```
+
+Hasil terakhir ada di [`docs/hasil-evaluasi.md`](docs/hasil-evaluasi.md). Label kebenaran tiap kasus
+ditulis tim di `backend/data/evaluasi_label.json`. Tambah `--live` untuk memakai Gemini dan SerpAPI.
+
+## Pemetaan ke kriteria penilaian
+
+| Kriteria | Di mana terlihat |
+|---|---|
+| Relevansi & manfaat bagi TNI AD | Kasus nyata TNI (r001–r003), alur kerja Dispenad, persetujuan petugas |
+| Inovasi teknis | Pelacakan sumber asli + pencocokan frame/audio + RAG korpus resmi, bukan sekadar klasifikasi |
+| Fungsionalitas prototipe | Demo live, 120+ tes otomatis (`pytest`), skrip evaluasi |
+| Kelayakan implementasi | Docker, Postgres, berjalan di server satuan; biaya API per kasus terukur |
+| Kualitas dokumentasi | README ini, `docs/kontrak-data.md`, `docs/skrip-demo.md` |
 
 Dokumen: [`PRD.md`](PRD.md) · [`task.md`](task.md) · [`docs/kontrak-data.md`](docs/kontrak-data.md) · [`docs/skrip-demo.md`](docs/skrip-demo.md)
 
@@ -65,7 +140,7 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-Dashboard memanggil API di `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`). Tidak ada login;
+Dashboard memanggil API di `NEXT_PUBLIC_API_URL` (default `/api`, diteruskan ke backend lewat `next.config.mjs`). Tidak ada login;
 ada pemilih "bertindak sebagai petugas" yang tercatat di audit trail.
 
 Halaman:
@@ -123,8 +198,10 @@ cadangannya daftar kata kunci. Level: tinggi ≥ 0.65, sedang ≥ 0.4.
 3. Untuk video: unduh kandidat (yt-dlp), cocokkan frame dengan perceptual hash
    (tepi frame dipotong supaya watermark tidak mengganggu) dan cocokkan pola audio.
    Hasilnya juga menunjukkan detik ke berapa potongan viral berasal di video asli.
-4. Peringkat kandidat: kemiripan 30%, tanggal unggah paling awal 25%, jenis sumber 15%,
-   resolusi 10%, bebas watermark 10%, kecocokan audio 10%.
+4. Peringkat kandidat: kemiripan 28%, tanggal unggah paling awal 22% (hanya penuh untuk kandidat
+   yang relevan), jenis sumber 15%, korroborasi penerbit independen 10%, kecocokan audio 9%,
+   resolusi 8%, bebas watermark 8%. Hasil Google Lens yang hanya mirip gambar tapi tidak membahas
+   klaim dibatasi skornya, supaya foto generik dari berita lain tidak dianggap sumber asli.
 
 **Persetujuan manusia** — draf klarifikasi hanya tayang setelah petugas menyetujui. Penolakan wajib
 disertai catatan. Setiap keputusan masuk audit trail.
@@ -135,15 +212,15 @@ bukan dipaksakan menjadi klarifikasi.
 
 ## Deploy
 
-**Hugging Face Spaces (gratis, tanpa kartu):** buat Space SDK **Gradio** (template Blank, CPU basic),
-isi secret `GEMINI_API_KEY`, `SERPAPI_KEY`, `DATABASE_URL`, `GEMINI_MODEL`, `GEMINI_MODEL_VERIFIKASI`,
-lalu push isi folder `backend/` ke repo Space (jangan timpa `README.md` milik Space). `app.py`
-menjalankan API FastAPI yang sama, plus halaman uji di `/ui`; `packages.txt` memasang ffmpeg.
+Demo publik berjalan di server sendiri lewat **Cloudflare Tunnel** (tanpa membuka port, HTTPS otomatis):
+backend di `localhost:8000`, dashboard di `localhost:3000`, STT di `localhost:8100`, lalu
+`cloudflared tunnel run --token <token>`. Token yang sama bisa dijalankan di beberapa mesin sekaligus
+sebagai cadangan; URL tidak berubah saat server dipindah.
 
-**Render / server dengan Docker:** pakai `backend/Dockerfile` (atau `render.yaml`). Container jalan
-sebagai user non-root.
+Server dengan Docker: pakai `backend/Dockerfile` (container jalan sebagai user non-root).
 
-Space/instance gratis tidur kalau lama tidak dipakai: buka `/health` sebelum demo.
+Untuk masa penjurian, isi di `.env` server: `IZINKAN_SEED=0` (tombol reset disembunyikan),
+`BATAS_PROSES_HARIAN`, dan `JEDA_PROSES_ULANG_MENIT`.
 
 ## Tes
 

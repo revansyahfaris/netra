@@ -1,0 +1,35 @@
+{
+  "_petunjuk": "Isi status yang BENAR menurut tim untuk tiap kasus: terbukti_diubah, tidak_ditemukan, atau belum_bisa_diverifikasi. Biarkan null kalau belum yakin. Tambahkan kasus fakta (konten asli) supaya false positive bisa diukur.",
+  "c001": {
+    "status": "terbukti_diubah",
+    "catatan": "sesuai tabel Kasus demo di README"
+  },
+  "c001b": {
+    "status": "belum_bisa_diverifikasi",
+    "catatan": "sesuai tabel Kasus demo di README"
+  },
+  "c002": {
+    "status": "terbukti_diubah",
+    "catatan": "sesuai tabel Kasus demo di README"
+  },
+  "c003": {
+    "status": null,
+    "catatan": ""
+  },
+  "c004": {
+    "status": "tidak_ditemukan",
+    "catatan": "sesuai tabel Kasus demo di README"
+  },
+  "r001": {
+    "status": "terbukti_diubah",
+    "catatan": "konten lama atau kutipan dipelintir, ada artikel klarifikasi"
+  },
+  "r002": {
+    "status": "terbukti_diubah",
+    "catatan": "konten lama atau kutipan dipelintir, ada artikel klarifikasi"
+  },
+  "r003": {
+    "status": "terbukti_diubah",
+    "catatan": "konten lama atau kutipan dipelintir, ada artikel klarifikasi"
+  }
+}

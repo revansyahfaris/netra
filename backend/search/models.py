@@ -62,6 +62,23 @@ def _token(teks: str) -> set[str]:
     return {w for w in re.findall(r"\w+", teks.lower()) if len(w) > 2}
 
 
+def relevansi_judul(klaim: str, judul: str) -> float:
+    """Seberapa nyambung judul hasil (mis. dari Google Lens) dengan teks klaim.
+
+    Diukur terhadap token judul yang lebih pendek, tanpa kata umum, supaya judul pendek
+    yang benar-benar membahas klaim tetap dapat nilai tinggi.
+    """
+    from .queries import STOPWORDS
+
+    def tok(s: str) -> set[str]:
+        return {w for w in re.findall(r"\w+", (s or "").lower()) if len(w) > 2 and w not in STOPWORDS}
+
+    k, j = tok(klaim), tok(judul)
+    if not k or not j:
+        return 0.0
+    return round(len(k & j) / min(len(k), len(j)), 2)
+
+
 def kemiripan_teks(query: str, teks: str, kutipan: bool = False) -> float:
     """Seberapa cocok hasil pencarian (judul + snippet) dengan query."""
     if not query or not teks:

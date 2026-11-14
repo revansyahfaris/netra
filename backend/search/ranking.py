@@ -35,6 +35,22 @@ AMBANG_RELEVAN_KORROBORASI = 0.45
 KEMIRIPAN_MIN = 0.35  # kandidat di bawah ini dibuang
 RELEVAN_PENUH = 0.7   # kemiripan minimal agar nilai "paling awal" dihitung penuh.
                       # Tanpa ini, hasil lama yang tidak nyambung bisa jadi juara hanya karena tua.
+RELEVAN_TEKS_LENS = 0.25    # judul hasil Lens di bawah ini dianggap tidak membahas klaim
+MAKS_KEMIRIPAN_VISUAL = 0.40  # batas kemiripan untuk hasil yang hanya mirip gambar
+
+
+def hanya_visual(t: Temuan) -> bool:
+    """Hasil Lens yang gambarnya mirip tapi isinya tidak membahas klaim dan belum terbukti lewat pHash.
+
+    Contoh nyata: foto operasi perbatasan 2017 muncul untuk klaim emas KKB 2026 karena fotonya mirip.
+    Hasil seperti ini tetap ditampilkan (bisa jadi bukti foto dipakai ulang), tapi tidak boleh
+    mendapat skor tinggi atau ikut menyumbang korroborasi.
+    """
+    if not t.dari_lens:
+        return False
+    if t.kemiripan_frame is not None and t.kemiripan_frame >= AMBANG_FRAME_KLASTER:
+        return False
+    return t.kemiripan_teks is None or t.kemiripan_teks < RELEVAN_TEKS_LENS
 
 
 def _utc(dt):
@@ -60,7 +76,7 @@ def evaluasi_korroborasi(semua: list[Temuan]) -> dict[str, dict]:
     """Hitung skor korroborasi independen & sinyal anti-buzzer per klaster kandidat."""
     per_klaster: dict[str, dict[str, Temuan]] = {}
     for t in semua:
-        if t.kemiripan < AMBANG_RELEVAN_KORROBORASI:
+        if t.kemiripan < AMBANG_RELEVAN_KORROBORASI or hanya_visual(t):
             continue
         klaster = _klaster_temuan(t)
         penerbit = penerbit_dari_url(t.url, t.uploader)
@@ -116,10 +132,12 @@ def komponen(
     nilai_tgl: float | None,
     info_korroborasi: dict[str, dict] | None = None,
 ) -> dict[str, float]:
-    k = {"kemiripan": t.kemiripan, "jenis_sumber": NILAI_JENIS.get(t.jenis_sumber, 0.3)}
+    visual_saja = hanya_visual(t)
+    kemiripan = min(t.kemiripan, MAKS_KEMIRIPAN_VISUAL) if visual_saja else t.kemiripan
+    k = {"kemiripan": kemiripan, "jenis_sumber": NILAI_JENIS.get(t.jenis_sumber, 0.3)}
     if nilai_tgl is not None:
-        k["tanggal"] = nilai_tgl * min(1.0, t.kemiripan / RELEVAN_PENUH)
-    if info_korroborasi:
+        k["tanggal"] = nilai_tgl * min(1.0, kemiripan / RELEVAN_PENUH)
+    if info_korroborasi and not visual_saja:
         info = info_korroborasi.get(_klaster_temuan(t))
         if info is not None:
             skor_korr = float(info["skor_korroborasi"])

@@ -7,6 +7,7 @@ tanpa setup. Isi DATABASE_URL (Neon/Postgres) untuk penyimpanan bersama.
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from sqlalchemy import create_engine, text
@@ -33,7 +34,9 @@ def _normalisasi(url: str) -> str:
 
 
 def _url_sqlite() -> str:
-    return f"sqlite:///{config.DATA_DIR / 'netra.db'}"
+    # SQLITE_PATH dipakai skrip evaluasi agar tidak menimpa database lokal
+    jalur = os.getenv("SQLITE_PATH") or str(config.DATA_DIR / "netra.db")
+    return f"sqlite:///{jalur}"
 
 
 def database_url() -> str:

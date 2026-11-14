@@ -28,7 +28,7 @@ export function Nav() {
             API
           </a>
           <span className="ml-2 rounded-full border border-amber-400/40 bg-amber-400/10 px-2.5 py-0.5 text-xs font-medium text-amber-200">
-            Prototipe · data simulasi
+            Prototipe · Kartika Cyber Hackathon 2026
           </span>
         </nav>
       </div>

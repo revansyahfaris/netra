@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { FormTambahKlaim } from "@/components/FormTambahKlaim";
+import { PanduanPanelis } from "@/components/PanduanPanelis";
 import { Badge, Card, Empty, ErrorBox, Skeleton, Stat } from "@/components/ui";
 import { api, ApiError, type Klaim, type KlaimLengkap, type Statistik } from "@/lib/api";
 import {
@@ -39,6 +40,14 @@ export default function HalamanAntrean() {
   const [cari, setCari] = useState("");
   const [menyegarkan, setMenyegarkan] = useState(false);
   const [modalTambah, setModalTambah] = useState(false);
+  const [bolehReset, setBolehReset] = useState(false);
+
+  useEffect(() => {
+    api
+      .health()
+      .then((h) => setBolehReset(h.seed_diizinkan !== false))
+      .catch(() => setBolehReset(false));
+  }, []);
 
   const muat = useCallback(async () => {
     setGalat(null);
@@ -83,12 +92,14 @@ export default function HalamanAntrean() {
 
   return (
     <div className="space-y-5">
+      <PanduanPanelis />
+
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Antrean klaim</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Klaim dari sistem deteksi, diurutkan menurut prioritas. Petugas memutuskan setelah paket
-            bukti lengkap.
+            Klaim dari sistem deteksi, diurutkan menurut prioritas. Klik satu klaim untuk melihat
+            sumber asli dan paket buktinya.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -106,6 +117,7 @@ export default function HalamanAntrean() {
           >
             Segarkan
           </button>
+          {bolehReset && (
           <button
             type="button"
             onClick={() => void resetDemo()}
@@ -115,6 +127,7 @@ export default function HalamanAntrean() {
           >
             {menyegarkan ? "Menyiapkan…" : "Reset data demo"}
           </button>
+          )}
         </div>
       </div>
 

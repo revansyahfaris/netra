@@ -9,7 +9,7 @@ from schemas import HasilPencarian, Klaim
 from url_kanonis import normalisasi_url
 
 from . import frames, ranking, web_search
-from .models import KonteksSinyal, Temuan
+from .models import KonteksSinyal, Temuan, relevansi_judul
 from .queries import buat_query
 
 log = logging.getLogger("netra.search")
@@ -136,6 +136,12 @@ def cari_sumber(
         for u in url_manual:
             temuan.append(Temuan(url=u, metode="keyword", kemiripan=0.5, jenis_sumber=sources.jenis_sumber(u),
                                  ada_watermark=sources.perkiraan_watermark(u)))
+
+    # Hasil Google Lens hanya mirip secara visual. Ukur juga apakah judulnya nyambung dengan klaim,
+    # supaya foto generik yang dipakai di berita lain tidak terlihat seperti sumber asli.
+    for t in temuan:
+        if t.dari_lens and t.kemiripan_teks is None:
+            t.kemiripan_teks = relevansi_judul(klaim.teks_klaim, f"{t.judul or ''} {t.cuplikan or ''}")
 
     digabung = ranking.gabung_duplikat(temuan)
     hasil = ranking.peringkat(digabung)
