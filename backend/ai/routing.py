@@ -11,7 +11,6 @@ Mengimplementasikan logika percabangan sesuai AI Blueprint:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 from typing import Any, Literal
@@ -20,6 +19,7 @@ from pydantic import BaseModel, Field
 
 import config
 import url_kanonis
+from search import instagram
 from schemas import (
     HasilPencarian,
     JenisMedia,
@@ -42,7 +42,7 @@ AMBANG_SKOR_MEMADAI = 0.45
 AMBANG_FRAME_MATCH_KUAT = 0.75
 AMBANG_TOPIK_TIER2 = 0.45
 AMBANG_RAG_VECTOR_RELEVAN = 0.55
-MAKS_KEYFRAME_RAG = 3
+MAKS_KEYFRAME_RAG = 5
 MAKS_KANDIDAT_JIT = 5
 
 JalurVerifikasi = Literal[
@@ -119,6 +119,31 @@ class HasilTahap2(BaseModel):
     indikasi_buzzer: bool = False
 
 
+def _ekstrak_sinyal_gambar(klaim: Klaim, media_str: str) -> tuple[SinyalKonten, bool]:
+    hasil_ocr = ocr.ocr_gambar(media_str, fallback_aman=True)
+    paths_lokal: list[Path] = []
+    if media_str.startswith(("http://", "https://")):
+        paths_lokal = ocr.daftar_cache_gambar(media_str)
+    else:
+        kandidat_path = Path(media_str)
+        if kandidat_path.exists():
+            paths_lokal = [kandidat_path]
+
+    path_lokal = paths_lokal[0] if paths_lokal else None
+    berhasil = bool(paths_lokal) or hasil_ocr.sumber_ocr != "gagal"
+    sinyal = SinyalKonten(
+        claim_id=klaim.claim_id,
+        teks_klaim=klaim.teks_klaim,
+        jenis_media=klaim.jenis_media,
+        media_url=media_str,
+        ocr=hasil_ocr,
+        media_lokal=str(path_lokal) if path_lokal else None,
+        keyframes_lokal=[str(p) for p in paths_lokal],
+        catatan=hasil_ocr.catatan if hasil_ocr.sumber_ocr == "gagal" else None,
+    )
+    return sinyal, berhasil
+
+
 def ekstrak_sinyal_klaim(
     klaim: Klaim,
     ambil_konten_eksternal: bool = True,
@@ -144,33 +169,21 @@ def ekstrak_sinyal_klaim(
         )
 
     if klaim.jenis_media == "gambar":
-        hasil_ocr = ocr.ocr_gambar(media_str, fallback_aman=True)
-        path_lokal: Path | None = None
-        if media_str.startswith(("http://", "https://")):
-            folder_cache = config.WORK_DIR / f"ai_img_{hashlib.md5(media_str.encode()).hexdigest()[:12]}"
-            kandidat_file = sorted(folder_cache.glob("gambar.*")) if folder_cache.exists() else []
-            path_lokal = kandidat_file[0] if kandidat_file else None
-        else:
-            kandidat_path = Path(media_str)
-            if kandidat_path.exists():
-                path_lokal = kandidat_path
-
-        return SinyalKonten(
-            claim_id=klaim.claim_id,
-            teks_klaim=klaim.teks_klaim,
-            jenis_media=klaim.jenis_media,
-            media_url=media_str,
-            ocr=hasil_ocr,
-            media_lokal=str(path_lokal) if path_lokal else None,
-            keyframes_lokal=[str(path_lokal)] if path_lokal else [],
-            catatan=hasil_ocr.catatan if hasil_ocr.sumber_ocr == "gagal" else None,
-        )
+        sinyal_img, _ = _ekstrak_sinyal_gambar(klaim, media_str)
+        return sinyal_img
 
     # klaim.jenis_media == "video"
     try:
         hasil_media = ekstraksi.ekstrak_sinyal_media(media_str)
     except ekstraksi.EkstraksiError as e:
         log.warning("Ekstraksi video klaim gagal (%s): %s", klaim.claim_id, e)
+        if instagram.shortcode_instagram(media_str):
+            sinyal_img, berhasil = _ekstrak_sinyal_gambar(klaim, media_str)
+            if berhasil:
+                sinyal_img.catatan = (
+                    f"Video tidak dapat diunduh ({e}); lanjut memakai slide gambar/thumbnail untuk OCR & pencocokan visual."
+                )
+                return sinyal_img
         return SinyalKonten(
             claim_id=klaim.claim_id,
             teks_klaim=klaim.teks_klaim,

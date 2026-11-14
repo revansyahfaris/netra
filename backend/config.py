@@ -19,10 +19,12 @@ def _key(nama: str) -> str:
 
 
 GEMINI_API_KEY = _key("GEMINI_API_KEY")
-# Model ringan untuk prioritas & pembuatan query (modul Faris)
+# Model ringan untuk prioritas, pembuatan query & format draf klarifikasi
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
-# Model untuk OCR, perbandingan & klarifikasi (modul Adriel). Default sama dengan GEMINI_MODEL.
+# Model untuk OCR & perbandingan fakta Tahap 4 (modul Adriel). Default sama dengan GEMINI_MODEL.
 GEMINI_MODEL_VERIFIKASI = os.getenv("GEMINI_MODEL_VERIFIKASI", "") or GEMINI_MODEL
+# Tingkat reasoning Tahap 4 Cross-Verification (minimal / low / medium / high)
+GEMINI_THINKING_VERIFIKASI = os.getenv("GEMINI_THINKING_VERIFIKASI", "low").strip().lower() or "low"
 GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
 SERPAPI_KEY = _key("SERPAPI_KEY")

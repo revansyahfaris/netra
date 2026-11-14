@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from schemas import (
@@ -265,6 +265,10 @@ class Repo:
             if lama is None or item.skor >= lama.skor:
                 dedup[kunci] = item
 
+        chunk_valid = self._chunk_id_valid_postgres(
+            ses, [i.chunk_id for i in dedup.values() if i.chunk_id is not None]
+        )
+
         if ganti:
             ses.execute(delete(KlaimBuktiRow).where(KlaimBuktiRow.claim_id == claim_id))
             eksisting: dict[tuple[int | None, str | None, str], KlaimBuktiRow] = {}
@@ -277,8 +281,14 @@ class Repo:
         hasil: list[TautanBukti] = []
         for kunci, item in dedup.items():
             waktu_item = item.dibuat_pada or now
+            chunk_simpan = (
+                item.chunk_id
+                if (item.chunk_id is None or chunk_valid is None or item.chunk_id in chunk_valid)
+                else None
+            )
             row_eksisting = eksisting.get(kunci)
             if row_eksisting is not None:
+                row_eksisting.chunk_id = chunk_simpan
                 row_eksisting.metode = item.metode
                 row_eksisting.peran = item.peran
                 row_eksisting.skor = item.skor
@@ -292,7 +302,7 @@ class Repo:
                 baru = KlaimBuktiRow(
                     claim_id=claim_id,
                     doc_id=item.doc_id,
-                    chunk_id=item.chunk_id,
+                    chunk_id=chunk_simpan,
                     tier=item.tier,
                     metode=item.metode,
                     peran=item.peran,
@@ -306,6 +316,22 @@ class Repo:
                 ses.add(baru)
                 hasil.append(_row_ke_tautan(baru))
         return hasil
+
+    @staticmethod
+    def _chunk_id_valid_postgres(ses: Session, chunk_ids: list[int]) -> set[int] | None:
+        if not chunk_ids:
+            return None
+        bind = ses.get_bind()
+        if bind is None or bind.dialect.name != "postgresql":
+            return None
+        ada_tabel = ses.execute(text("SELECT to_regclass('netra_korpus_chunk')")).scalar()
+        if not ada_tabel:
+            return set()
+        rows = ses.execute(
+            text("SELECT chunk_id FROM netra_korpus_chunk WHERE chunk_id = ANY(:ids)"),
+            {"ids": list(set(chunk_ids))},
+        ).scalars()
+        return set(rows)
 
     def simpan_bukti_klaim(
         self,
@@ -345,12 +371,18 @@ class Repo:
         target = doc_id_atau_url.strip()
         if not target:
             return []
-        if target.lower().startswith(("http://", "https://")):
-            target = doc_id_dari_url(target)
+        kanon = normalisasi_url(target) if target.lower().startswith(("http://", "https://")) else None
+        if kanon:
+            target = doc_id_dari_url(kanon)
+        kondisi = (
+            or_(KlaimBuktiRow.doc_id == target, KlaimBuktiRow.url_kanonis == kanon)
+            if kanon
+            else (KlaimBuktiRow.doc_id == target)
+        )
         with self._s() as ses:
             q = (
                 select(KlaimBuktiRow.claim_id)
-                .where(KlaimBuktiRow.doc_id == target)
+                .where(kondisi)
                 .distinct()
                 .order_by(KlaimBuktiRow.claim_id)
             )

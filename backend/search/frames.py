@@ -18,7 +18,7 @@ from PIL import Image
 import config
 from url_kanonis import normalisasi_url
 
-from . import dates, sources
+from . import dates, instagram, sources
 
 log = logging.getLogger("netra.frames")
 
@@ -72,6 +72,30 @@ def _detik_ke_teks(detik: float) -> str:
 
 # ---------- Info & unduh ----------
 
+def _info_video_instagram_embed(sumber: str) -> InfoVideo | None:
+    info = instagram.ambil_info_instagram_embed(sumber)
+    if not info or not info.video_urls:
+        return None
+    return InfoVideo(
+        url=normalisasi_url(sumber) or sumber,
+        judul=info.caption[:120],
+        uploader=info.uploader,
+        tanggal_unggah=info.tanggal_unggah,
+    )
+
+
+def _unduh_video_instagram_embed(sumber: str, folder: Path) -> Path | None:
+    info = instagram.ambil_info_instagram_embed(sumber)
+    if not info or not info.video_urls:
+        return None
+    for video_url in info.video_urls:
+        try:
+            return instagram.unduh_video_url(video_url, folder / "video.mp4")
+        except Exception as e:
+            log.debug("Fallback unduh video embed Instagram gagal (%s): %s", video_url[:60], e)
+    return None
+
+
 def info_video(sumber: str) -> InfoVideo:
     """Metadata tanpa mengunduh: tanggal unggah, resolusi tertinggi, uploader."""
     p = Path(sumber)
@@ -81,11 +105,15 @@ def info_video(sumber: str) -> InfoVideo:
     try:
         import yt_dlp
     except ImportError as e:
+        if ig := _info_video_instagram_embed(sumber):
+            return ig
         raise VideoError("yt-dlp belum terpasang") from e
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
             d = ydl.extract_info(sumber, download=False)
     except Exception as e:  # yt-dlp melempar banyak jenis error
+        if ig := _info_video_instagram_embed(sumber):
+            return ig
         raise VideoError(f"Gagal membaca info video: {e}") from e
     tinggi = max((f.get("height") or 0 for f in d.get("formats") or []), default=0) or d.get("height")
     return InfoVideo(
@@ -110,21 +138,33 @@ def siapkan_video(sumber: str) -> Path:
     try:
         import yt_dlp
     except ImportError as e:
+        if ig_path := _unduh_video_instagram_embed(sumber, folder):
+            return ig_path
         raise VideoError("yt-dlp belum terpasang") from e
     opsi = {
         "quiet": True,
         "no_warnings": True,
-        "format": "worst[height>=240]/worst",   # cukup untuk hashing, unduhan cepat
+        "format": (
+            "worst[height>=240][acodec!=none]/"
+            "worstvideo[height>=240]+worstaudio/"
+            "worst[acodec!=none]/worstvideo+worstaudio/worst"
+        ),
+        "merge_output_format": "mp4",
         "outtmpl": str(folder / "video.%(ext)s"),
-        "max_filesize": 150 * 1024 * 1024,
+        "max_filesize": instagram.MAKS_BYTES_VIDEO,
     }
     try:
         with yt_dlp.YoutubeDL(opsi) as ydl:
             ydl.download([sumber])
     except Exception as e:
+        # yt-dlp sering gagal pada carousel campuran / post IG tertentu: fallback ke embed video_url
+        if ig_path := _unduh_video_instagram_embed(sumber, folder):
+            return ig_path
         raise VideoError(f"Gagal mengunduh video: {e}") from e
     ada = list(folder.glob("video.*"))
     if not ada:
+        if ig_path := _unduh_video_instagram_embed(sumber, folder):
+            return ig_path
         raise VideoError("Video tidak terunduh")
     return ada[0]
 

@@ -1,6 +1,10 @@
 """Pencarian web lewat SerpAPI: Google (keyword & kutipan), YouTube, dan Google Lens (reverse image)."""
 
+from concurrent.futures import ThreadPoolExecutor
+import html
 import logging
+import re
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -18,12 +22,70 @@ class SearchError(Exception):
     pass
 
 
+_POLA_HREF = re.compile(r'<a[^>]+href=["\'](https?://[^"\']+)["\']', re.I)
+
+
+def _adalah_redirect_google(url: str | None) -> bool:
+    if not url or not url.startswith("http"):
+        return False
+    parsed = urlparse(url)
+    host = sources.domain(url)
+    is_google = (
+        host in {"google.com", "google.co.id"}
+        or host.endswith(".google.com")
+        or host.endswith(".google.co.id")
+    )
+    return is_google and parsed.path in ("/goto", "/url")
+
+
+def _selesaikan_redirect_url(url: str | None) -> str | None:
+    """Resolve tautan redirect internal Google (mis. /url?q=... atau /goto?url=CAES...) ke URL tujuan."""
+    if not url or not _adalah_redirect_google(url):
+        return url
+
+    qs = parse_qs(urlparse(url).query)
+    for kunci in ("q", "url"):
+        val = (qs.get(kunci) or [None])[0]
+        if val and val.startswith(("http://", "https://")) and not _adalah_redirect_google(val):
+            return val
+
+    try:
+        r = httpx.get(url, follow_redirects=False, timeout=5.0)
+    except httpx.HTTPError as e:
+        log.debug("Gagal menyelesaikan redirect Google (%s): %s", url[:80], e)
+        return url
+
+    lokasi = r.headers.get("location")
+    if lokasi and lokasi.startswith(("http://", "https://")):
+        return lokasi
+
+    if r.text:
+        m = _POLA_HREF.search(r.text)
+        if m:
+            return html.unescape(m.group(1))
+    return url
+
+
+def _selesaikan_banyak_url(urls: list[str | None]) -> list[str | None]:
+    if not any(_adalah_redirect_google(u) for u in urls):
+        return urls
+    pekerja = min(4, sum(1 for u in urls if _adalah_redirect_google(u)))
+    if pekerja <= 1:
+        return [_selesaikan_redirect_url(u) for u in urls]
+    with ThreadPoolExecutor(max_workers=pekerja) as pool:
+        return list(pool.map(_selesaikan_redirect_url, urls))
+
+
 def _url_layak(url: str | None) -> bool:
     """Buang tautan redirect/internal mesin pencari (mis. google.com/goto, /url?q=) yang bukan sumber."""
     if not url or not url.startswith("http"):
         return False
     host = sources.domain(url)
-    return not (host in {"google.com", "google.co.id", "googleusercontent.com"} or host.endswith(".google.com"))
+    return not (
+        host in {"google.com", "google.co.id", "googleusercontent.com"}
+        or host.endswith(".google.com")
+        or host.endswith(".google.co.id")
+    )
 
 
 def _serpapi(params: dict) -> dict:
@@ -48,21 +110,36 @@ def _serpapi(params: dict) -> dict:
 def cari_google(query: str, kutipan: bool = False, jumlah: int = 8) -> list[Temuan]:
     q = f'"{query}"' if kutipan else query
     data = _serpapi({"engine": "google", "q": q, "hl": "id", "gl": "id", "num": jumlah})
+    items = data.get("organic_results", [])[:jumlah]
+    urls = _selesaikan_banyak_url([item.get("link") for item in items])
+    indeks_fallback = [
+        i
+        for i, (item, url) in enumerate(zip(items, urls))
+        if not _url_layak(url) and item.get("redirect_link")
+    ]
+    if indeks_fallback:
+        fallback_urls = _selesaikan_banyak_url(
+            [items[i].get("redirect_link") for i in indeks_fallback]
+        )
+        for i, url_baru in zip(indeks_fallback, fallback_urls):
+            if _url_layak(url_baru):
+                urls[i] = url_baru
     hasil = []
-    for item in data.get("organic_results", [])[:jumlah]:
-        url = item.get("link")
+    for item, url in zip(items, urls):
         if not _url_layak(url):
             continue
         judul, snippet = item.get("title", ""), item.get("snippet", "")
+        kanal = item.get("source")
         hasil.append(
             Temuan(
                 url=url,
                 metode="kutipan" if kutipan else "keyword",
                 kemiripan=kemiripan_teks(query, f"{judul} {snippet}", kutipan),
-                jenis_sumber=sources.jenis_sumber(url),
+                jenis_sumber=sources.jenis_sumber(url, kanal),
                 judul=judul,
                 tanggal_unggah=dates.parse(item.get("date")),
                 cuplikan=snippet[:200] or None,
+                uploader=kanal,
                 ada_watermark=sources.perkiraan_watermark(url),
                 asal="google",
             )
@@ -108,9 +185,10 @@ def reverse_image(image_url: str, jumlah: int = 8, untuk_video: bool = False) ->
     terverifikasi. Kandidat video dari Lens tetap diprioritaskan untuk dicek pHash.
     """
     data = _serpapi({"engine": "google_lens", "url": image_url, "hl": "id", "country": "id"})
+    items = data.get("visual_matches", [])[:jumlah]
+    urls = _selesaikan_banyak_url([item.get("link") for item in items])
     hasil = []
-    for i, item in enumerate(data.get("visual_matches", [])[:jumlah]):
-        url = item.get("link")
+    for i, (item, url) in enumerate(zip(items, urls)):
         if not _url_layak(url):
             continue
         # Lens tidak memberi skor; perkirakan dari urutan hasil

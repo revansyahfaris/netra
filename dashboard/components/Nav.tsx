@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { API_BASE } from "@/lib/api";
+
 export function Nav() {
   return (
     <header className="border-b border-slate-800 bg-slate-900">
@@ -18,7 +20,7 @@ export function Nav() {
             Antrean
           </Link>
           <a
-            href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/docs`}
+            href={`${API_BASE}/docs`}
             target="_blank"
             rel="noreferrer"
             className="rounded-md px-3 py-1.5 text-slate-300 transition hover:bg-slate-800 hover:text-white"

@@ -228,8 +228,12 @@ def test_verifikasi_silang_terbukti_diubah_dan_normalisasi_url(monkeypatch):
     tahap2 = _hasil_tahap2_siap(k)
 
     def fake_multimodal(parts, **kwargs):
+        import config
+
         assert kwargs.get("instruksi_sistem") == SYSTEM_PROMPT_VERIFIKASI
         assert kwargs.get("skema") == SCHEMA_VERIFIKASI_SILANG
+        assert kwargs.get("thinking") == config.GEMINI_THINKING_VERIFIKASI
+        assert kwargs.get("media_resolution") == "MEDIA_RESOLUTION_LOW"
         return {
             "status": "terbukti_diubah",
             "keyakinan": 0.91,
@@ -353,4 +357,22 @@ def test_fallback_aman_saat_llm_error_dan_mode_ketat(monkeypatch):
 
     with pytest.raises(VerifikasiError):
         verifikasi_silang(k, tahap2, sertakan_visual=False, fallback_aman=False)
+
+
+def test_susun_parts_verifikasi_lampirkan_semua_slide_gambar(tmp_path):
+    slides = []
+    for i in range(1, 4):
+        p = tmp_path / f"slide_{i}.jpg"
+        p.write_bytes(b"\xff\xd8\xff\xe0" + str(i).encode())
+        slides.append(str(p))
+
+    k = _klaim(claim_id="ig_slide", jenis_media="gambar", media_url="https://www.instagram.com/p/CAROUSEL1/")
+    tahap2 = _hasil_tahap2_siap(k)
+    tahap2.sinyal_klaim.jenis_media = "gambar"
+    tahap2.sinyal_klaim.media_lokal = slides[0]
+    tahap2.sinyal_klaim.keyframes_lokal = slides
+
+    parts = susun_parts_verifikasi(k, tahap2, sertakan_visual=True)
+    gambar_parts = [p for p in parts if "inlineData" in p]
+    assert len(gambar_parts) == 3
 

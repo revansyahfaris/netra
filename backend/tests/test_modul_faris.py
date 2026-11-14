@@ -277,3 +277,270 @@ def test_pipeline_pencarian_lens_video_dan_peristiwa(monkeypatch):
     assert "https://www.youtube.com/watch?v=LENSVID1" in proses["video_dicocokkan"]
     assert "korroborasi" in proses
     assert hasil.kandidat and hasil.kandidat[0].metode == "frame_match"
+
+
+def test_cari_google_resolve_redirect_goto_dan_buang_internal(monkeypatch):
+    import httpx
+    from search import web_search
+
+    monkeypatch.setattr(
+        web_search,
+        "_serpapi",
+        lambda params: {
+            "organic_results": [
+                {
+                    "link": "https://www.google.com/goto?url=CAES_TOK_1&gsessionid=abc",
+                    "title": "Berita Kompas Gibran",
+                    "snippet": "Klarifikasi resmi soal gim.",
+                },
+                {
+                    "link": "https://www.google.com/url?q=https://tempo.co/cekfakta/123&sa=U",
+                    "title": "Cek Fakta Tempo",
+                    "snippet": "Penjelasan lengkap.",
+                },
+                {
+                    "link": "https://www.google.com/goto?url=CAES_INTERNAL",
+                    "title": "Internal Google",
+                    "snippet": "Tetap google.com.",
+                },
+            ]
+        },
+    )
+
+    def fake_get(url, follow_redirects=False, timeout=None):
+        if "CAES_TOK_1" in url:
+            return httpx.Response(
+                302,
+                headers={"location": "https://www.kompas.com/tren/read/1"},
+                request=httpx.Request("GET", url),
+            )
+        return httpx.Response(
+            200,
+            text='<A HREF="https://accounts.google.com/ServiceLogin">login</A>',
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    hasil = web_search.cari_google("gibran gta 6")
+    assert [t.url for t in hasil] == [
+        "https://www.kompas.com/tren/read/1",
+        "https://tempo.co/cekfakta/123",
+    ]
+    assert hasil[0].jenis_sumber == "media"
+
+
+def test_cari_sumber_gambar_memakai_keyframe_url_untuk_lens(monkeypatch):
+    import config
+    from search import KonteksSinyal, cari_sumber, web_search
+
+    monkeypatch.setattr(config, "SERPAPI_KEY", "dummy-serp")
+    panggilan_lens = []
+    monkeypatch.setattr(web_search, "cari_google", lambda q, kutipan=False, maks=8: [])
+    monkeypatch.setattr(
+        web_search,
+        "reverse_image",
+        lambda url_g, maks=8, untuk_video=False: (
+            panggilan_lens.append((url_g, untuk_video)) or []
+        ),
+    )
+
+    k = klaim(
+        claim_id="img_lens",
+        teks_klaim="Foto disebut pernyataan pejabat",
+        jenis_media="gambar",
+        media_url="https://www.instagram.com/p/Dfr0ZdtGMD0/",
+    )
+    konteks = KonteksSinyal(
+        ocr_teks=[],
+        watermark=[],
+        keyframe_urls=["https://netra-api.tokorejeki.my.id/media-sementara/abc"],
+    )
+    cari_sumber(k, konteks=konteks)
+    assert panggilan_lens == [("https://netra-api.tokorejeki.my.id/media-sementara/abc", False)]
+
+
+def test_buat_query_tanpa_tanda_kutip_tidak_mengisi_kutipan(monkeypatch):
+    from search import queries
+
+    monkeypatch.setattr(
+        "llm.tanya_json",
+        lambda *a, **kw: {
+            "kutipan": ["Gibran berkomentar bahwa ia akan bermain GTA 6"],
+            "keyword": ["Gibran komentar GTA 6", "Gibran main GTA VI"],
+        },
+    )
+    q_tanpa = queries.buat_query("Gibran berkomentar bahwa ia akan bermain GTA 6")
+    assert q_tanpa["kutipan"] == []
+    assert q_tanpa["keyword"] == ["Gibran komentar GTA 6", "Gibran main GTA VI"]
+
+    monkeypatch.setattr(
+        "llm.tanya_json",
+        lambda *a, **kw: {
+            "kutipan": ["Saya siap bermain GTA 6 November nanti"],
+            "keyword": ["Gibran GTA 6"],
+        },
+    )
+    q_dengan = queries.buat_query('Gibran bilang "Saya siap bermain GTA 6 November nanti"')
+    assert q_dengan["kutipan"] == ["Saya siap bermain GTA 6 November nanti"]
+
+
+def test_cari_sumber_gambar_carousel_kirim_multi_slide_ke_lens(monkeypatch):
+    import config
+    from search import KonteksSinyal, cari_sumber, web_search
+
+    monkeypatch.setattr(config, "SERPAPI_KEY", "dummy-serp")
+    panggilan_lens = []
+    monkeypatch.setattr(web_search, "cari_google", lambda q, kutipan=False, maks=8: [])
+    monkeypatch.setattr(
+        web_search,
+        "reverse_image",
+        lambda url_g, maks=8, untuk_video=False: (
+            panggilan_lens.append((url_g, untuk_video))
+            or [
+                Temuan(
+                    f"https://kompas.com/read/{url_g[-1]}",
+                    "frame_match",
+                    0.8,
+                    jenis_sumber="media",
+                    dari_lens=True,
+                )
+            ]
+        ),
+    )
+
+    k = klaim(
+        claim_id="ig_multi",
+        teks_klaim="Postingan carousel Instagram",
+        jenis_media="gambar",
+        media_url="https://www.instagram.com/p/CAROUSEL1/",
+    )
+    slides = [f"https://netra-api.tokorejeki.my.id/media-sementara/s{i}" for i in range(1, 5)]
+    hasil, _ = cari_sumber(k, konteks=KonteksSinyal(keyframe_urls=slides))
+    assert panggilan_lens == [(u, False) for u in slides]
+    assert len(hasil.kandidat) == 4
+
+
+def test_jenis_sumber_media_diperluas_dan_prefiks_kanal():
+    assert sources.jenis_sumber("https://www.nu.or.id/amp/nasional/kesaksian-ugm") == "media"
+    assert sources.jenis_sumber("https://tirto.id/cek-fakta-contoh") == "media"
+    assert sources.jenis_sumber("https://katadata.co.id/berita/1") == "media"
+    assert sources.jenis_sumber("https://mafindo.or.id/klarifikasi") == "media"
+    assert sources.jenis_sumber("https://www.facebook.com/watch/?v=1", "Facebook · BBC News Indonesia") == "media"
+    assert sources.jenis_sumber("https://www.instagram.com/p/abc/", "Instagram · @kompastv") == "media"
+    assert sources.jenis_sumber("https://www.facebook.com/p/puspen/", "Facebook · Puspen TNI") == "resmi"
+    # Akun pribadi di media sosial tetap diklasifikasikan sebagai pribadi
+    assert sources.jenis_sumber("https://www.facebook.com/ryan.c.julianda/posts/1", "Facebook · Ryan C. Julianda") == "pribadi"
+
+
+def test_cari_google_teruskan_source_ke_jenis_sumber(monkeypatch):
+    import httpx
+    from search import web_search
+
+    monkeypatch.setattr(
+        web_search,
+        "_serpapi",
+        lambda p: {
+            "organic_results": [
+                {
+                    "link": "https://www.facebook.com/bbcnewsindonesia/videos/123/",
+                    "title": "Liputan Demonstrasi UGM",
+                    "snippet": "Laporan wartawan di lokasi.",
+                    "source": "Facebook · BBC News Indonesia",
+                },
+                {
+                    "link": "https://www.facebook.com/budi.santoso/posts/456/",
+                    "title": "Status warganet",
+                    "snippet": "Opini pribadi.",
+                    "source": "Facebook · Budi Santoso",
+                },
+            ]
+        },
+    )
+    hasil = web_search.cari_google("demonstrasi ugm")
+    assert len(hasil) == 2
+    assert hasil[0].jenis_sumber == "media"
+    assert hasil[0].uploader == "Facebook · BBC News Indonesia"
+    assert hasil[1].jenis_sumber == "pribadi"
+
+
+def test_siapkan_dan_info_video_fallback_instagram_embed_mixed_carousel(tmp_path, monkeypatch):
+    import json
+    from contextlib import contextmanager
+    import httpx
+    import yt_dlp
+    import config
+    from search import frames
+
+    monkeypatch.setattr(config, "WORK_DIR", tmp_path / "work")
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=False):
+            raise RuntimeError("No video formats found!")
+
+        def download(self, urls):
+            raise RuntimeError("No video formats found!")
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+
+    ctx = {
+        "gql_data": {
+            "shortcode_media": {
+                "__typename": "GraphSidecar",
+                "shortcode": "DfkhFTFE8c3",
+                "taken_at_timestamp": 1794600000,
+                "owner": {"username": "persma.ugm"},
+                "edge_media_to_caption": {
+                    "edges": [{"node": {"text": "Kronologi kericuhan di sekitar kampus UGM."}}]
+                },
+                "edge_sidecar_to_children": {
+                    "edges": [
+                        {"node": {"is_video": False, "video_url": False, "display_url": "https://cdn.ig.test/cover.jpg"}},
+                        {"node": {"is_video": True, "video_url": "https://cdn.ig.test/slide2.mp4", "display_url": "https://cdn.ig.test/slide2.jpg"}},
+                    ]
+                },
+            }
+        }
+    }
+    html_embed = f'<script>"contextJSON":{json.dumps(json.dumps(ctx))}</script>'
+
+    def fake_get(url, follow_redirects=True, timeout=None, headers=None):
+        assert "/embed/captioned/" in url
+        return httpx.Response(
+            200,
+            text=html_embed,
+            headers={"content-type": "text/html; charset=utf-8"},
+            request=httpx.Request("GET", url),
+        )
+
+    @contextmanager
+    def fake_stream(method, url, follow_redirects=True, timeout=None, headers=None):
+        assert url == "https://cdn.ig.test/slide2.mp4"
+        yield httpx.Response(
+            200,
+            content=b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom",
+            headers={"content-type": "video/mp4", "content-length": "24"},
+            request=httpx.Request(method, url),
+        )
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr("httpx.stream", fake_stream)
+
+    url_ig = "https://www.instagram.com/p/DfkhFTFE8c3/?srtk=abc"
+    info = frames.info_video(url_ig)
+    assert info.uploader == "persma.ugm"
+    assert "Kronologi kericuhan" in info.judul
+    assert info.tanggal_unggah is not None and info.tanggal_unggah.year == 2026
+
+    path_vid = frames.siapkan_video(url_ig)
+    assert path_vid.exists()
+    assert path_vid.name == "video.mp4"
+    assert path_vid.read_bytes().startswith(b"\x00\x00\x00\x18ftyp")

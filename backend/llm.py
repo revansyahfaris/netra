@@ -79,6 +79,25 @@ def _post(model: str, body: dict, timeout: float) -> httpx.Response:
         raise LLMError(type(e).__name__) from None
 
 
+_PETA_RESOLUSI_MEDIA = {
+    "low": "MEDIA_RESOLUTION_LOW",
+    "medium": "MEDIA_RESOLUTION_MEDIUM",
+    "high": "MEDIA_RESOLUTION_HIGH",
+    "ultra_high": "MEDIA_RESOLUTION_ULTRA_HIGH",
+    "media_resolution_low": "MEDIA_RESOLUTION_LOW",
+    "media_resolution_medium": "MEDIA_RESOLUTION_MEDIUM",
+    "media_resolution_high": "MEDIA_RESOLUTION_HIGH",
+    "media_resolution_ultra_high": "MEDIA_RESOLUTION_ULTRA_HIGH",
+}
+
+
+def _normalisasi_resolusi_media(nilai: str | None) -> str | None:
+    if not nilai or not nilai.strip():
+        return None
+    bersih = nilai.strip()
+    return _PETA_RESOLUSI_MEDIA.get(bersih.lower(), bersih.upper())
+
+
 def _kirim_generate(
     parts: list[dict],
     suhu: float = 0.2,
@@ -87,6 +106,7 @@ def _kirim_generate(
     model: str | None = None,
     thinking: str | None = "low",
     instruksi_sistem: str | None = None,
+    media_resolution: str | None = None,
 ) -> dict | list:
     if not config.llm_aktif():
         raise LLMError("GEMINI_API_KEY belum diisi")
@@ -98,6 +118,8 @@ def _kirim_generate(
         gen["responseSchema"] = skema
     if thinking:
         gen["thinkingConfig"] = {"thinkingLevel": thinking}
+    if res := _normalisasi_resolusi_media(media_resolution):
+        gen["mediaResolution"] = res
     body: dict = {"contents": [{"role": "user", "parts": parts}], "generationConfig": gen}
     if instruksi_sistem:
         body["systemInstruction"] = {"parts": [{"text": instruksi_sistem}]}
@@ -105,9 +127,24 @@ def _kirim_generate(
     batas = timeout if timeout is not None else config.HTTP_TIMEOUT
 
     r = _post(model_id, body, batas)
-    if r.status_code == 400 and thinking and "thinking" in pesan_error(r).lower():
-        # Model ini tidak mendukung thinkingLevel: ulangi tanpa pengaturan itu
-        gen.pop("thinkingConfig")
+    for _ in range(2):
+        if r.status_code != 400:
+            break
+        err = pesan_error(r).lower()
+        gen_baru = dict(gen)
+        diubah = False
+        if "thinkingConfig" in gen_baru and "thinking" in err:
+            gen_baru.pop("thinkingConfig")
+            diubah = True
+        if "mediaResolution" in gen_baru and (
+            "mediaresolution" in err or "media_resolution" in err or "media resolution" in err
+        ):
+            gen_baru.pop("mediaResolution")
+            diubah = True
+        if not diubah:
+            break
+        gen = gen_baru
+        body = {**body, "generationConfig": gen}
         r = _post(model_id, body, batas)
     if r.status_code != 200:
         pesan = f"HTTP {r.status_code}: {pesan_error(r)}"
@@ -150,10 +187,11 @@ def tanya_multimodal_json(
     model: str | None = None,
     thinking: str | None = "low",
     instruksi_sistem: str | None = None,
+    media_resolution: str | None = None,
 ) -> dict | list:
     """Kirim kombinasi teks + gambar/audio/video dan minta structured JSON.
     Default memakai config.GEMINI_MODEL_VERIFIKASI (tugas OCR/perbandingan)."""
     batas = timeout if timeout is not None else max(config.HTTP_TIMEOUT, 60.0)
     return _kirim_generate(parts, suhu=suhu, skema=skema, timeout=batas,
                            model=model or config.GEMINI_MODEL_VERIFIKASI, thinking=thinking,
-                           instruksi_sistem=instruksi_sistem)
+                           instruksi_sistem=instruksi_sistem, media_resolution=media_resolution)

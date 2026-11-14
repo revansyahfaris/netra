@@ -151,7 +151,7 @@ def _siapkan_konteks_sinyal(klaim: Klaim) -> tuple[KonteksSinyal | None, ai.Siny
     sinyal = ai.ekstrak_sinyal_klaim(klaim, ambil_konten_eksternal=True)
     keyframe_urls = [
         url
-        for kf in sinyal.keyframes_lokal[:3]
+        for kf in sinyal.keyframes_lokal[:5]
         if (url := media_publik.terbitkan_url(Path(kf))) is not None
     ]
     konteks = KonteksSinyal(

@@ -103,9 +103,15 @@ def cari_sumber(
             for p in q.get("peristiwa", [])[:2]:
                 temuan += _aman("youtube peristiwa", web_search.cari_youtube, p)
 
-        # 2. Reverse image search (gambar maupun keyframe video via URL publik sementara)
-        if klaim.jenis_media == "gambar" and klaim.media_url:
-            temuan += _aman("google lens", web_search.reverse_image, str(klaim.media_url))
+        # 2. Reverse image search (gambar/carousel maupun keyframe video via URL publik sementara)
+        if klaim.jenis_media == "gambar":
+            urls_lens = (
+                konteks.keyframe_urls[:4]
+                if konteks and konteks.keyframe_urls
+                else ([str(klaim.media_url)] if klaim.media_url else [])
+            )
+            for kf_url in urls_lens:
+                temuan += _aman("google lens", web_search.reverse_image, kf_url)
         elif klaim.jenis_media == "video" and konteks and konteks.keyframe_urls:
             for kf_url in konteks.keyframe_urls[:3]:
                 temuan += _aman(

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -68,6 +68,24 @@ def get_session_factory() -> sessionmaker[Session]:
     return _session_factory
 
 
+def _migrasi_postgres(engine: Engine) -> None:
+    """Hapus FK doc_id lama yang membuat tautan bukti Tier-1 gagal disimpan di Postgres."""
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "DO $$ BEGIN "
+                    "IF to_regclass('netra_klaim_bukti') IS NOT NULL THEN "
+                    "ALTER TABLE netra_klaim_bukti DROP CONSTRAINT IF EXISTS fk_netra_klaim_bukti_doc_id; "
+                    "END IF; END $$;"
+                )
+            )
+    except Exception as e:
+        log.warning("Migrasi constraint netra_klaim_bukti dilewati: %s", e)
+
+
 def init_db() -> None:
     """Buat tabel kalau belum ada. Aman dipanggil berulang.
 
@@ -79,7 +97,9 @@ def init_db() -> None:
 
     for percobaan in (1, 2):
         try:
-            Base.metadata.create_all(get_engine())
+            eng = get_engine()
+            Base.metadata.create_all(eng)
+            _migrasi_postgres(eng)
             return
         except OperationalError as e:
             if mode() != "postgres":

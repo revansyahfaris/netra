@@ -387,6 +387,8 @@ def test_bersihkan_temuan_kadaluwarsa_dan_skema(monkeypatch):
     assert "cakupan VARCHAR(16)" in schema_sql
     assert "kadaluwarsa_pada TIMESTAMPTZ" in schema_sql
     assert "CREATE TABLE IF NOT EXISTS netra_klaim_bukti" in schema_sql
+    assert "DROP CONSTRAINT IF EXISTS fk_netra_klaim_bukti_doc_id" in schema_sql
+    assert "ADD CONSTRAINT fk_netra_klaim_bukti_doc_id" not in schema_sql
 
 
 def test_embed_multimodal_banyak_keyframe_dan_dokumen_masih_aktif(tmp_path, monkeypatch):

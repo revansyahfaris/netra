@@ -19,10 +19,10 @@ PROMPT = """Kamu pemeriksa fakta. Dari klaim viral berikut, buat query pencarian
 Klaim: "{teks}"
 
 Aturan:
-- "kutipan": kalimat yang diklaim diucapkan seseorang, persis seperti di klaim (kosongkan kalau tidak ada kutipan).
+- "kutipan": HANYA frasa ucapan langsung yang persis diapit tanda kutip ("..." atau '...') di teks klaim. Isi [] jika klaim hanya berupa parafrase tidak langsung atau tidak mencantumkan ucapan bertanda kutip (jangan masukkan kalimat seperti "Si A berkomentar bahwa..." ke kutipan).
 - "keyword": 3-4 variasi query pendek (maks 8 kata) dalam bahasa Indonesia. Hilangkan klaim waktu/narasi
   yang mungkin dipelintir (misal "minggu ini", "baru saja"), fokus pada peristiwa, tokoh, dan lokasi,
-  supaya rekaman/berita aslinya ikut ketemu. Sertakan satu variasi yang memakai nama resmi (misal "TNI AD").
+  supaya rekaman/berita aslinya ikut ketemu. Jangan membatasi "keyword" ke instansi tertentu kecuali memang relevan dengan tokoh/peristiwa di klaim.
 
 Jawab JSON saja: {{"kutipan": ["..."], "keyword": ["...", "..."]}}"""
 
@@ -98,15 +98,33 @@ def _blok_konteks(konteks: KonteksSinyal | None) -> str:
     )
 
 
+def _kutipan_valid(teks_klaim: str, kandidat: list[str]) -> list[str]:
+    """Hanya pakai query exact-match kutipan bila klaim memang memuat petikan langsung."""
+    ada_tanda_kutip = any(t in teks_klaim for t in ('"', "'", "“", "”", "‘", "’"))
+    if not ada_tanda_kutip:
+        return []
+    klaim_lower = teks_klaim.strip().lower()
+    hasil: list[str] = []
+    for k in kandidat:
+        bersih = k.strip().strip('"\'“”‘’').strip()
+        if not bersih:
+            continue
+        # Hindari memasukkan ulang kalimat parafrase penuh sebagai kutipan exact match
+        if bersih.lower() == klaim_lower and not POLA_KUTIPAN.search(teks_klaim):
+            continue
+        hasil.append(bersih)
+    return hasil[:2]
+
+
 def buat_query(teks_klaim: str, konteks: KonteksSinyal | None = None) -> dict[str, list[str]]:
     peristiwa = query_peristiwa(konteks)
     try:
         j = llm.tanya_json(PROMPT.format(teks=teks_klaim) + _blok_konteks(konteks), suhu=0.4)
-        kutipan = [str(q).strip() for q in j.get("kutipan", []) if str(q).strip()]
+        kutipan = _kutipan_valid(teks_klaim, [str(q) for q in j.get("kutipan", []) if str(q).strip()])
         keyword = [str(q).strip() for q in j.get("keyword", []) if str(q).strip()][:4]
         if not keyword:
             raise ValueError("LLM tidak memberi keyword")
-        return {"kutipan": kutipan[:2], "keyword": keyword, "peristiwa": peristiwa}
+        return {"kutipan": kutipan, "keyword": keyword, "peristiwa": peristiwa}
     except (llm.LLMError, ValueError, AttributeError, TypeError) as e:
         log.info("Query pakai fallback (%s)", e)
         hasil = _fallback(teks_klaim)

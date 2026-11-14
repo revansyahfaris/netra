@@ -615,3 +615,110 @@ def test_routing_dua_sumbu_dan_jit_tier2_cache_dan_multi_keyframe(tmp_path, monk
     )
     assert res_resmi.jalur == "eskalasi_tidak_ditemukan"
     assert cari_kosong["cakupan"] == "resmi"
+
+
+def test_ekstrak_gambar_polos_mengisi_keyframes_lokal_untuk_jit_rag(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setattr(config, "WORK_DIR", tmp_path / "work")
+    url_foto = "https://kompas.com/foto/ilustrasi-asli.jpg"
+
+    def fake_get(url, follow_redirects=True, timeout=None, headers=None):
+        return httpx.Response(
+            200,
+            content=b"\xff\xd8\xff\xe0fotojpeg",
+            headers={"content-type": "image/jpeg"},
+            request=httpx.Request("GET", url),
+        )
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr(
+        "ai.ocr.ocr_keyframes",
+        lambda kfs, fallback_aman=True: HasilOCR(teks_unik=[], sumber_ocr="gemini"),
+    )
+
+    k = _kandidat(
+        url=url_foto,
+        jenis_sumber="media",
+        metode="frame_match",
+        kemiripan=0.6,
+        skor=0.65,
+        judul="Foto Asli Kegiatan",
+    )
+    sig = ekstrak_sinyal_kandidat(k)
+    assert sig.jenis_konten == "gambar"
+    assert sig.sumber_ekstraksi == "ocr_gambar"
+    assert sig.ekstraksi_penuh_berhasil is True
+    assert sig.keyframes_lokal and Path(sig.keyframes_lokal[0]).exists()
+
+    # Pastikan _indeks_jit_tier2 memanggil rag.indeks_media_korpus (bukan indeks teks biasa)
+    from ai.routing import _indeks_jit_tier2
+
+    media_terindeks = []
+    monkeypatch.setattr("ai.rag.dokumen_masih_aktif", lambda doc_id: False)
+    monkeypatch.setattr(
+        "ai.rag.indeks_media_korpus",
+        lambda dok, **kw: media_terindeks.append((dok.cakupan, dok.jenis_media, kw["media_paths"])) or 1,
+    )
+    diindeks, _ = _indeks_jit_tier2([k], ambil_konten_eksternal=True)
+    assert diindeks == [url_foto]
+    assert media_terindeks and media_terindeks[0][0] == "temuan"
+    assert media_terindeks[0][1] == "gambar"
+    assert len(media_terindeks[0][2]) == 1
+
+
+def test_ekstrak_sinyal_klaim_video_ig_tanpa_video_fallback_ke_slide_gambar(tmp_path, monkeypatch):
+    from ai import ekstraksi
+
+    monkeypatch.setattr(config, "WORK_DIR", tmp_path / "work")
+
+    def gagal_video(url, **kw):
+        raise ekstraksi.EkstraksiError("No video formats found!")
+
+    monkeypatch.setattr(ekstraksi, "ekstrak_sinyal_media", gagal_video)
+
+    ctx = {
+        "gql_data": {
+            "shortcode_media": {
+                "__typename": "GraphSidecar",
+                "edge_sidecar_to_children": {
+                    "edges": [
+                        {"node": {"display_url": f"https://cdn.ig.test/p{i}.jpg", "is_video": False}}
+                        for i in range(1, 3)
+                    ]
+                },
+            }
+        }
+    }
+    html_embed = f'<script>"contextJSON":{json.dumps(json.dumps(ctx))}</script>'
+
+    def fake_get(url, follow_redirects=True, timeout=None, headers=None):
+        if "/embed/captioned/" in url:
+            return httpx.Response(200, text=html_embed, request=httpx.Request("GET", url))
+        if "cdn.ig.test/p" in url:
+            return httpx.Response(
+                200,
+                content=b"\xff\xd8\xff\xe0jpg",
+                headers={"content-type": "image/jpeg"},
+                request=httpx.Request("GET", url),
+            )
+        raise AssertionError(f"URL tak terduga: {url}")
+
+    monkeypatch.setattr("httpx.get", fake_get)
+    monkeypatch.setattr(
+        "ai.ocr.ocr_keyframes",
+        lambda kfs, fallback_aman=True: HasilOCR(teks_unik=["TEKS SLIDE IG"], sumber_ocr="gemini"),
+    )
+
+    k = _klaim(
+        claim_id="ig_foto_as_vid",
+        teks_klaim="Klaim postingan IG foto dikirim sebagai video",
+        jenis_media="video",
+        media_url="https://www.instagram.com/p/FOTO2SLIDE/",
+        platform="Instagram",
+    )
+    sig = ekstrak_sinyal_klaim(k)
+    assert sig.ocr.teks_unik == ["TEKS SLIDE IG"]
+    assert len(sig.keyframes_lokal) == 2
+    assert sig.media_lokal is not None
+    assert "slide gambar" in (sig.catatan or "").lower()

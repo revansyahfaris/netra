@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, TypeAdapter, ValidationError
 
+import config
 import llm
 from schemas import (
     Bukti,
@@ -455,21 +456,35 @@ def susun_konteks_verifikasi(klaim: Klaim, hasil_tahap2: HasilTahap2) -> str:
 
 
 def _lampiran_visual(sinyal: SinyalKonten) -> list[dict]:
-    if not sinyal.media_lokal:
+    kandidat_path: list[Path] = []
+    if sinyal.jenis_media == "gambar" and sinyal.keyframes_lokal:
+        kandidat_path = [Path(p) for p in sinyal.keyframes_lokal[:5]]
+    elif sinyal.media_lokal:
+        kandidat_path = [Path(sinyal.media_lokal)]
+
+    total_bytes = 0
+    terpilih: list[Path] = []
+    for path in kandidat_path:
+        if not path.is_file() or path.suffix.lower() not in EKSTENSI_VISUAL_VALID:
+            continue
+        try:
+            ukuran = path.stat().st_size
+        except OSError:
+            continue
+        if ukuran <= 0 or total_bytes + ukuran > MAKS_BYTES_VISUAL_KLAIM:
+            continue
+        total_bytes += ukuran
+        terpilih.append(path)
+
+    if not terpilih:
         return []
-    path = Path(sinyal.media_lokal)
-    if not path.is_file() or path.suffix.lower() not in EKSTENSI_VISUAL_VALID:
-        return []
-    try:
-        ukuran = path.stat().st_size
-    except OSError:
-        return []
-    if ukuran <= 0 or ukuran > MAKS_BYTES_VISUAL_KLAIM:
-        return []
-    return [
-        llm.part_teks("Lampiran visual representatif dari konten viral yang sedang diaudit:"),
-        llm.part_file(path),
-    ]
+
+    label = (
+        "Lampiran visual representatif dari konten viral yang sedang diaudit:"
+        if len(terpilih) == 1
+        else f"Lampiran visual slide 1..{len(terpilih)} dari postingan viral yang sedang diaudit:"
+    )
+    return [llm.part_teks(label), *(llm.part_file(p) for p in terpilih)]
 
 
 def susun_parts_verifikasi(
@@ -782,7 +797,8 @@ def verifikasi_silang(
     sertakan_visual: bool = True,
     ambang_keyakinan: float = AMBANG_KEYAKINAN_PUTUSAN,
     model: str | None = None,
-    thinking: str | None = "medium",
+    thinking: str | None = None,
+    media_resolution: str | None = "MEDIA_RESOLUTION_LOW",
     suhu: float = 0.1,
     timeout: float | None = None,
     fallback_aman: bool = True,
@@ -791,6 +807,7 @@ def verifikasi_silang(
     if not hasil_tahap2.siap_tahap4:
         return _rakit_eskalasi_pra_llm(klaim, hasil_tahap2)
 
+    level_thinking = thinking if thinking is not None else config.GEMINI_THINKING_VERIFIKASI
     parts = susun_parts_verifikasi(klaim, hasil_tahap2, sertakan_visual=sertakan_visual)
     try:
         mentah = llm.tanya_multimodal_json(
@@ -799,7 +816,8 @@ def verifikasi_silang(
             skema=SCHEMA_VERIFIKASI_SILANG,
             timeout=timeout,
             model=model,
-            thinking=thinking,
+            thinking=level_thinking,
+            media_resolution=media_resolution,
             instruksi_sistem=SYSTEM_PROMPT_VERIFIKASI,
         )
     except llm.LLMError as e:

@@ -169,7 +169,7 @@ def buat_draf_klarifikasi(
         mentah = llm.tanya_json(
             _prompt_draf(klaim, hasil_v4),
             suhu=0.2,
-            model=model or config.GEMINI_MODEL_VERIFIKASI,
+            model=model or config.GEMINI_MODEL,
             thinking="low",
             skema=SCHEMA_DRAF_KLARIFIKASI,
             timeout=timeout,

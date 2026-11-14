@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { FormTambahKlaim } from "@/components/FormTambahKlaim";
 import { Badge, Card, Empty, ErrorBox, Skeleton, Stat } from "@/components/ui";
-import { api, ApiError, type KlaimLengkap, type Statistik } from "@/lib/api";
+import { api, ApiError, type Klaim, type KlaimLengkap, type Statistik } from "@/lib/api";
 import {
   cn,
   formatAngka,
@@ -37,6 +38,7 @@ export default function HalamanAntrean() {
   const [level, setLevel] = useState("");
   const [cari, setCari] = useState("");
   const [menyegarkan, setMenyegarkan] = useState(false);
+  const [modalTambah, setModalTambah] = useState(false);
 
   const muat = useCallback(async () => {
     setGalat(null);
@@ -89,7 +91,14 @@ export default function HalamanAntrean() {
             bukti lengkap.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setModalTambah(true)}
+            className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
+          >
+            + Tambah klaim
+          </button>
           <button
             type="button"
             onClick={() => void muat()}
@@ -232,6 +241,12 @@ export default function HalamanAntrean() {
                         <span className="font-mono">{klaim.claim_id}</span>
                         <span>·</span>
                         <span>{klaim.jenis_media}</span>
+                        {klaim.sumber_masuk === "manual" && (
+                          <>
+                            <span>·</span>
+                            <span className="font-medium text-brand-600">manual</span>
+                          </>
+                        )}
                         <span>·</span>
                         <span>{formatAngka(klaim.jumlah_share)} share</span>
                       </p>
@@ -281,6 +296,19 @@ export default function HalamanAntrean() {
           </div>
         )}
       </Card>
+
+      <FormTambahKlaim
+        terbuka={modalTambah}
+        onTutup={() => setModalTambah(false)}
+        onTersimpan={(klaim: Klaim, bukaDetail: boolean) => {
+          setModalTambah(false);
+          if (bukaDetail) {
+            router.push(`/klaim/${klaim.claim_id}`);
+          } else {
+            void muat();
+          }
+        }}
+      />
     </div>
   );
 }

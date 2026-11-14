@@ -64,7 +64,7 @@ CREATE INDEX IF NOT EXISTS ix_netra_korpus_chunk_embedding_hnsw
 CREATE TABLE IF NOT EXISTS netra_klaim_bukti (
     id SERIAL PRIMARY KEY,
     claim_id VARCHAR(64) NOT NULL,
-    doc_id TEXT REFERENCES netra_korpus_dokumen(doc_id) ON DELETE SET NULL,
+    doc_id TEXT,
     chunk_id INTEGER REFERENCES netra_korpus_chunk(chunk_id) ON DELETE SET NULL,
     tier VARCHAR(32) NOT NULL DEFAULT 'tier2_rag',
     metode VARCHAR(32) NOT NULL DEFAULT 'rag',
@@ -88,17 +88,9 @@ CREATE INDEX IF NOT EXISTS ix_netra_klaim_bukti_chunk_id
 
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint c
-        JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
-        WHERE c.conrelid = 'netra_klaim_bukti'::regclass
-          AND c.contype = 'f'
-          AND a.attname = 'doc_id'
-    ) THEN
+    IF to_regclass('netra_klaim_bukti') IS NOT NULL THEN
         ALTER TABLE netra_klaim_bukti
-            ADD CONSTRAINT fk_netra_klaim_bukti_doc_id
-            FOREIGN KEY (doc_id) REFERENCES netra_korpus_dokumen(doc_id) ON DELETE SET NULL;
+            DROP CONSTRAINT IF EXISTS fk_netra_klaim_bukti_doc_id;
     END IF;
 
     IF NOT EXISTS (

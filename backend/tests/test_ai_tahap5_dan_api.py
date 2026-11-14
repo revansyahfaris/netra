@@ -116,15 +116,20 @@ def test_tahap5_draf_klarifikasi_llm_fallback_dan_guardrail(monkeypatch):
 
     # 1. Mode LLM sukses menghasilkan 3 format draf
     monkeypatch.setattr(config, "GEMINI_API_KEY", "dummy-key")
-    monkeypatch.setattr(
-        "llm.tanya_json",
-        lambda *a, **kw: {
+    kwargs_llm = {}
+
+    def fake_tanya_json(*a, **kw):
+        kwargs_llm.update(kw)
+        return {
             "kartu": "KLARIFIKASI: Video tersebut adalah rekaman latihan tahun 2021.",
             "pendek": "Video latihan Agustus 2021 di Situbondo dipotong dan dinarasikan ulang.",
             "whatsapp": "*[KLARIFIKASI]* Video berasal dari Latihan Gabungan 2021 (Situbondo).",
-        },
-    )
+        }
+
+    monkeypatch.setattr("llm.tanya_json", fake_tanya_json)
     res_llm = susun_hasil_verifikasi(klaim, ht2, v4, waktu_proses_detik=1.25)
+    assert kwargs_llm.get("model") == config.GEMINI_MODEL
+    assert kwargs_llm.get("thinking") == "low"
     assert isinstance(res_llm, HasilVerifikasi)
     assert res_llm.status == "terbukti_diubah"
     assert res_llm.perlu_eskalasi is False

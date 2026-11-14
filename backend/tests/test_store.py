@@ -249,3 +249,35 @@ def test_simpan_verifikasi_kelola_netra_klaim_bukti(repo):
     hasil_akhir = repo.daftar_bukti_klaim("v1")
     assert len(hasil_akhir) == 1
     assert hasil_akhir[0].doc_id == doc_id_dari_url("https://antaranews.com/berita/1")
+
+
+def test_migrasi_postgres_hapus_fk_doc_id_dan_filter_chunk(monkeypatch):
+    from sqlalchemy import create_engine
+    from store import db as store_db
+
+    engine_sqlite = create_engine("sqlite:///:memory:")
+    # Pastikan aman saat dipanggil pada SQLite (no-op)
+    store_db._migrasi_postgres(engine_sqlite)
+
+    dieksekusi = []
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, stmt):
+            dieksekusi.append(str(stmt))
+
+    class FakePgEngine:
+        class dialect:
+            name = "postgresql"
+
+        def begin(self):
+            return FakeConn()
+
+    store_db._migrasi_postgres(FakePgEngine())
+    assert len(dieksekusi) == 1
+    assert "DROP CONSTRAINT IF EXISTS fk_netra_klaim_bukti_doc_id" in dieksekusi[0]
