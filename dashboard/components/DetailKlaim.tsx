@@ -14,6 +14,7 @@ import {
 } from "@/components/ui";
 import { DrafKlarifikasi } from "@/components/DrafKlarifikasi";
 import { PanelPersetujuan } from "@/components/PanelPersetujuan";
+import { SebelumSesudah } from "@/components/SebelumSesudah";
 import { api, ApiError, type KlaimLengkap } from "@/lib/api";
 import {
   cn,
@@ -455,7 +456,17 @@ export function DetailKlaim({ id }: { id: string }) {
       {draf && (
         <Card>
           <CardHeader judul="Draf klarifikasi" keterangan="Wajib disetujui petugas sebelum tayang." />
-          <DrafKlarifikasi draf={draf} />
+          <DrafKlarifikasi
+            draf={draf}
+            visual={
+              verifikasi ? <SebelumSesudah
+                  klaim={klaim}
+                  verifikasi={verifikasi}
+                  kandidat={kandidat}
+                  simulasi={pencarian?.mode === "demo"}
+                /> : undefined
+            }
+          />
         </Card>
       )}
 
