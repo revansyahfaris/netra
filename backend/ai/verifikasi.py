@@ -121,6 +121,8 @@ SCHEMA_VERIFIKASI_SILANG = {
         "keyakinan": {"type": "NUMBER"},
         "konsisten_dengan_sumber": {"type": "BOOLEAN"},
         "sumber_tertua_meragukan": {"type": "BOOLEAN"},
+        "peristiwa_inti_terjadi": {"type": "BOOLEAN"},
+        "bantahan_hanya_pihak_tertuduh": {"type": "BOOLEAN"},
         "sumber_utama_url": {"type": "STRING", "nullable": True},
         "manipulasi": {
             "type": "OBJECT",
@@ -201,6 +203,12 @@ PENANGANAN STATUS & ESKALASI (WORST-CASE):
   - Sumber acuan tertua/utama ikut terindikasi dimanipulasi, meragukan, atau berasal dari akun tidak otentik (`sumber_tertua_meragukan = true`).
   - Klaim terlihat selaras dengan sumber resmi dan tidak ditemukan indikasi manipulasi (`konsisten_dengan_sumber = true`): jangan memaksakan `"terbukti_diubah"`, serahkan ke petugas melalui eskalasi.
 - Pilih `"tidak_ditemukan"` bila seluruh bukti pembanding yang tersaji tidak relevan maupun tidak cukup mendukung atau membantah klaim.
+
+PERISTIWA NYATA YANG DIPERDEBATKAN (WAJIB):
+- Isi `peristiwa_inti_terjadi = true` bila sumber independen (media atau lembaga yang BUKAN pihak yang dituduh) melaporkan bahwa peristiwa inti dalam klaim memang terjadi, misalnya ada penembakan, korban, atau bentrokan, walaupun detailnya berbeda dari narasi viral.
+- Isi `bantahan_hanya_pihak_tertuduh = true` bila satu-satunya bantahan atas klaim berasal dari pihak yang dituduh (misalnya klaim menuduh TNI dan yang membantah hanya TNI).
+- Pada kedua kondisi itu, JANGAN pilih `"terbukti_diubah"`. Pilih `"belum_bisa_diverifikasi"`, jelaskan bagian mana yang terkonfirmasi dan bagian mana yang masih diperdebatkan. Bantahan pihak yang dituduh bukan bukti independen.
+- Label `dipotong` hanya boleh dipakai bila ada bukti frame atau transkrip yang menunjukkan bagian yang dipotong.
 
 PANDUAN ISI OUTPUT:
 - `ringkasan`: 1-3 kalimat ringkas, netral, dan faktual untuk petugas verifikasi.
@@ -642,6 +650,41 @@ def _rakit_fallback_llm(
     )
 
 
+_AKTOR_APARAT = re.compile(
+    r"\b(tni|tentara|prajurit|militer|aparat|kopassus|kostrad|yonif|kodim|koramil|babinsa|marinir)\b",
+    re.IGNORECASE,
+)
+_KEKERASAN = re.compile(
+    r"(tembak|penembakan|bunuh|pembunuhan|tewas|aniaya|penganiayaan|pukul|bantai|pembantaian|siksa|"
+    r"penyiksaan|culik|penculikan|perkosa|kekerasan|represif|membabi buta|korban jiwa)",
+    re.IGNORECASE,
+)
+AMBANG_FRAME_KUAT = 0.60
+BATAS_KEYAKINAN_TANPA_BUKTI_KERAS = 0.80
+
+
+def tuduhan_kekerasan_aparat(teks: str | None) -> bool:
+    """Klaim menuduh aparat/TNI melakukan kekerasan. Bantahan atas klaim seperti ini rawan konflik kepentingan."""
+    teks = teks or ""
+    return bool(_AKTOR_APARAT.search(teks) and _KEKERASAN.search(teks))
+
+
+def _ada_frame_kuat(hasil_tahap2: HasilTahap2) -> bool:
+    for k in hasil_tahap2.kandidat_bersih:
+        frame = (k.rincian_skor or {}).get("frame")
+        if frame is None and k.metode == "frame_match":
+            frame = k.kemiripan
+        if frame is not None and frame >= AMBANG_FRAME_KUAT:
+            return True
+    return False
+
+
+def _ada_sumber_resmi(hasil_tahap2: HasilTahap2) -> bool:
+    return bool(hasil_tahap2.hasil_rag) or any(
+        k.jenis_sumber == "resmi" for k in hasil_tahap2.kandidat_bersih
+    )
+
+
 def _validasi_output_llm(
     mentah: dict[str, Any],
     klaim: Klaim,
@@ -663,7 +706,9 @@ def _validasi_output_llm(
     keyakinan = round(min(max(keyakinan, 0.0), 1.0), 4)
 
     manipulasi = AnalisisManipulasi.model_validate(mentah.get("manipulasi") or {})
-    perubahan = manipulasi.daftar_perubahan()
+    peristiwa_inti_terjadi = bool(mentah.get("peristiwa_inti_terjadi", False))
+    bantahan_pihak_tertuduh = bool(mentah.get("bantahan_hanya_pihak_tertuduh", False))
+    frame_kuat = _ada_frame_kuat(hasil_tahap2)
 
     konsisten = bool(mentah.get("konsisten_dengan_sumber", False))
     sumber_meragukan = bool(mentah.get("sumber_tertua_meragukan", False))
@@ -714,8 +759,32 @@ def _validasi_output_llm(
     status_final: StatusVerifikasi = status_awal  # type: ignore[assignment]
     catatan_guardrail: list[str] = []
 
+    # Label "dipotong" wajib didukung bukti frame/transkrip, bukan dugaan
+    if manipulasi.dipotong and not frame_kuat and not any(
+        b.jenis in ("frame", "transkrip") for b in bukti_valid
+    ):
+        manipulasi.dipotong = False
+        manipulasi.detail_dipotong = None
+        catatan_guardrail.append("Label 'dipotong' dihapus karena tidak ada bukti frame atau transkrip.")
+    perubahan = manipulasi.daftar_perubahan()
+
     if status_final == "terbukti_diubah":
-        if sumber_meragukan:
+        if peristiwa_inti_terjadi or bantahan_pihak_tertuduh:
+            status_final = "belum_bisa_diverifikasi"
+            catatan_guardrail.append(
+                "Peristiwa inti dilaporkan sumber independen atau bantahan hanya datang dari pihak yang "
+                "dituduh; yang diperdebatkan adalah detailnya, jadi keputusan diserahkan ke petugas."
+            )
+        elif tuduhan_kekerasan_aparat(klaim.teks_klaim) and not (
+            frame_kuat and (manipulasi.tanggal_berbeda or manipulasi.konteks_berbeda)
+        ):
+            status_final = "belum_bisa_diverifikasi"
+            catatan_guardrail.append(
+                "Klaim menuduh kekerasan oleh aparat. Netra tidak menyatakan klaim seperti ini keliru "
+                "tanpa bukti visual bahwa rekamannya berasal dari peristiwa lain; perlu konfirmasi "
+                "independen oleh petugas."
+            )
+        elif sumber_meragukan:
             status_final = "belum_bisa_diverifikasi"
             catatan_guardrail.append("Sumber acuan tertua ikut meragukan.")
         elif konsisten:
@@ -732,6 +801,15 @@ def _validasi_output_llm(
         elif not perubahan:
             status_final = "belum_bisa_diverifikasi"
             catatan_guardrail.append("Tidak ada jenis manipulasi spesifik yang teridentifikasi.")
+
+    if status_final == "terbukti_diubah" and not frame_kuat and not _ada_sumber_resmi(hasil_tahap2):
+        if keyakinan > BATAS_KEYAKINAN_TANPA_BUKTI_KERAS:
+            keyakinan = BATAS_KEYAKINAN_TANPA_BUKTI_KERAS
+            catatan_guardrail.append(
+                "Keyakinan dibatasi karena bukti hanya dari media/akun, tanpa sumber resmi atau kecocokan frame."
+            )
+    if status_awal == "terbukti_diubah" and status_final != "terbukti_diubah":
+        keyakinan = min(keyakinan, 0.5)
 
     if status_final in ("tidak_ditemukan", "belum_bisa_diverifikasi"):
         perlu_eskalasi = True

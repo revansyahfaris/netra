@@ -2,10 +2,10 @@
 
 import json
 import logging
+import re
 
 import config
 from schemas import HasilPencarian, Klaim
-
 from url_kanonis import normalisasi_url
 
 from . import frames, ranking, web_search
@@ -17,6 +17,36 @@ log = logging.getLogger("netra.search")
 MAKS_VIDEO_DICOCOKKAN = 8   # unduh & cocokkan maksimal sekian kandidat video (cukup untuk korroborasi)
 DOMAIN_VIDEO = ("youtube.com", "youtu.be", "tiktok.com", "instagram.com", "x.com", "twitter.com", "facebook.com", "fb.watch")
 
+
+
+_POLA_ID_MEDIA = (
+    re.compile(r"(?:x|twitter)\.com/[^/]+/status/(\d+)"),
+    re.compile(r"tiktok\.com/@[^/]+/video/(\d+)"),
+    re.compile(r"instagram\.com/(?:p|reel|reels)/([\w-]+)"),
+    re.compile(r"(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([\w-]{11})"),
+    re.compile(r"facebook\.com/.+?/(?:videos|posts)/(\d+)"),
+)
+
+
+def _id_media(url: str) -> str | None:
+    for pola in _POLA_ID_MEDIA:
+        m = pola.search(url or "")
+        if m:
+            return f"{pola.pattern[:12]}:{m.group(1)}"
+    return None
+
+
+def sama_dengan_viral(url: str, media_url: str | None) -> bool:
+    """Apakah kandidat sebenarnya konten viral itu sendiri (mis. .../status/ID/video/1).
+
+    Konten viral tidak boleh dinilai sebagai sumber aslinya sendiri.
+    """
+    if not url or not media_url:
+        return False
+    a, b = _id_media(url), _id_media(media_url)
+    if a and b:
+        return a == b
+    return normalisasi_url(url).rstrip("/") == normalisasi_url(media_url).rstrip("/")
 
 def _demo(klaim: Klaim) -> list[Temuan] | None:
     """Data kandidat contoh untuk klaim demo (dipakai kalau SERPAPI_KEY kosong)."""
@@ -119,6 +149,13 @@ def cari_sumber(
                     lambda u: web_search.reverse_image(u, untuk_video=True),
                     kf_url,
                 )
+
+    # Konten viral itu sendiri sering ikut muncul di hasil pencarian; jangan jadikan kandidat.
+    if klaim.media_url:
+        sebelum = len(temuan)
+        temuan = [t for t in temuan if not sama_dengan_viral(t.url, str(klaim.media_url))]
+        if len(temuan) != sebelum:
+            proses["konten_viral_dibuang"] = sebelum - len(temuan)
 
     # 3. Pencocokan frame & audio untuk video
     if klaim.jenis_media == "video" and klaim.media_url and (config.search_aktif() or url_manual):
