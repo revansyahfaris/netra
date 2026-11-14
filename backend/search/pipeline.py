@@ -5,6 +5,7 @@ import logging
 import re
 
 import config
+import progres
 from schemas import HasilPencarian, Klaim
 from url_kanonis import normalisasi_url
 
@@ -117,6 +118,7 @@ def cari_sumber(
     if not config.search_aktif() and not url_manual:
         temuan = _demo(klaim) or []
 
+    progres.lapor("pencarian")
     # 1. Pencarian teks (kutipan, keyword, dan konteks peristiwa STT/OCR)
     if config.search_aktif():
         q = buat_query(klaim.teks_klaim, konteks=konteks)
@@ -133,6 +135,8 @@ def cari_sumber(
             for p in q.get("peristiwa", [])[:2]:
                 temuan += _aman("youtube peristiwa", web_search.cari_youtube, p)
 
+        if klaim.jenis_media in ("gambar", "video"):
+            progres.lapor("lens")
         # 2. Reverse image search (gambar/carousel maupun keyframe video via URL publik sementara)
         if klaim.jenis_media == "gambar":
             urls_lens = (
@@ -158,6 +162,8 @@ def cari_sumber(
             proses["konten_viral_dibuang"] = sebelum - len(temuan)
 
     # 3. Pencocokan frame & audio untuk video
+    if klaim.jenis_media == "video":
+        progres.lapor("frame")
     if klaim.jenis_media == "video" and klaim.media_url and (config.search_aktif() or url_manual):
         kandidat_video = _pilih_kandidat_video(
             url_manual, temuan, MAKS_VIDEO_DICOCOKKAN + len(url_manual)

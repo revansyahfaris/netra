@@ -14,8 +14,14 @@ import {
 } from "@/components/ui";
 import { DrafKlarifikasi } from "@/components/DrafKlarifikasi";
 import { PanelPersetujuan } from "@/components/PanelPersetujuan";
+import { formatDurasi, ProgresPipeline } from "@/components/ProgresPipeline";
 import { PostinganIG } from "@/components/PostinganIG";
-import { api, ApiError, type KlaimLengkap } from "@/lib/api";
+import {
+  api,
+  ApiError,
+  type KlaimLengkap,
+  type StatusPekerjaanPipeline,
+} from "@/lib/api";
 import {
   cn,
   formatAngka,
@@ -58,8 +64,14 @@ const URUTAN_RINCIAN: Record<string, string> = {
 
 const LABEL_TAHAP: Record<string, string> = {
   menunggu: "antre",
-  pencarian: "cari sumber & Lens",
-  verifikasi: "verifikasi AI",
+  mulai: "menyiapkan",
+  ekstraksi: "ekstraksi",
+  pencarian: "cari sumber",
+  lens: "Lens",
+  frame: "cocokkan frame",
+  analisis: "analisis",
+  verifikasi: "verifikasi",
+  klarifikasi: "susun hasil",
 };
 
 export function DetailKlaim({ id }: { id: string }) {
@@ -68,6 +80,7 @@ export function DetailKlaim({ id }: { id: string }) {
   const [proses, setProses] = useState(false);
   const [tahap, setTahap] = useState<string | null>(null);
   const [semuaKandidat, setSemuaKandidat] = useState(false);
+  const [job, setJob] = useState<StatusPekerjaanPipeline | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aktifRef = useRef(true);
 
@@ -78,16 +91,19 @@ export function DetailKlaim({ id }: { id: string }) {
     }
   }, []);
 
-  const muat = useCallback(async (pertahankanGalat = false) => {
-    try {
-      setData(await api.klaim(id));
-      if (!pertahankanGalat) {
-        setGalat(null);
+  const muat = useCallback(
+    async (pertahankanGalat = false) => {
+      try {
+        setData(await api.klaim(id));
+        if (!pertahankanGalat) {
+          setGalat(null);
+        }
+      } catch (e) {
+        setGalat(e instanceof ApiError ? e.message : "Gagal memuat klaim.");
       }
-    } catch (e) {
-      setGalat(e instanceof ApiError ? e.message : "Gagal memuat klaim.");
-    }
-  }, [id]);
+    },
+    [id],
+  );
 
   const pantauJob = useCallback(async () => {
     if (!aktifRef.current) return;
@@ -98,6 +114,7 @@ export function DetailKlaim({ id }: { id: string }) {
       if (st.status_kerja === "antre" || st.status_kerja === "berjalan") {
         setProses(true);
         setTahap(st.tahap_saat_ini);
+        setJob(st);
         timerRef.current = setTimeout(() => {
           void pantauJob();
         }, 1500);
@@ -135,6 +152,7 @@ export function DetailKlaim({ id }: { id: string }) {
           if (st.status_kerja === "antre" || st.status_kerja === "berjalan") {
             setProses(true);
             setTahap(st.tahap_saat_ini);
+            setJob(st);
             timerRef.current = setTimeout(() => {
               void pantauJob();
             }, 1500);
@@ -167,7 +185,9 @@ export function DetailKlaim({ id }: { id: string }) {
     } catch (e) {
       setProses(false);
       setTahap(null);
-      setGalat(e instanceof ApiError ? e.message : "Gagal menjadwalkan pipeline.");
+      setGalat(
+        e instanceof ApiError ? e.message : "Gagal menjadwalkan pipeline.",
+      );
     }
   }
 
@@ -222,26 +242,44 @@ export function DetailKlaim({ id }: { id: string }) {
         <div className="px-5 py-4">
           <div className="flex flex-wrap items-center gap-2">
             {klaim.level && (
-              <span className={cn("rounded px-2 py-0.5 text-[11px] font-semibold", WARNA_LEVEL[klaim.level])}>
+              <span
+                className={cn(
+                  "rounded px-2 py-0.5 text-[11px] font-semibold",
+                  WARNA_LEVEL[klaim.level],
+                )}
+              >
                 Prioritas {LABEL_LEVEL[klaim.level]}
-                {klaim.skor_prioritas != null ? ` · ${klaim.skor_prioritas.toFixed(2)}` : ""}
+                {klaim.skor_prioritas != null
+                  ? ` · ${klaim.skor_prioritas.toFixed(2)}`
+                  : ""}
               </span>
             )}
-            <Badge tone={WARNA_PIPELINE[klaim.status_pipeline]}>{LABEL_PIPELINE[klaim.status_pipeline]}</Badge>
+            <Badge tone={WARNA_PIPELINE[klaim.status_pipeline]}>
+              {LABEL_PIPELINE[klaim.status_pipeline]}
+            </Badge>
             <span className="ml-auto font-mono text-xs text-slate-400">
               {klaim.claim_id}
               {pencarian ? ` · ${pencarian.mode}` : ""}
             </span>
           </div>
-          <h1 className="mt-2 text-lg font-semibold leading-snug text-slate-900">{klaim.teks_klaim}</h1>
+          <h1 className="mt-2 text-lg font-semibold leading-snug text-slate-900">
+            {klaim.teks_klaim}
+          </h1>
           <p className="mt-1.5 text-xs text-slate-500">
-            {klaim.jenis_media} · ditemukan {formatTanggal(klaim.tanggal_ditemukan)} ·{" "}
-            {formatAngka(klaim.jumlah_share)} share · {formatAngka(klaim.jumlah_view)} view ·{" "}
+            {klaim.jenis_media} · ditemukan{" "}
+            {formatTanggal(klaim.tanggal_ditemukan)} ·{" "}
+            {formatAngka(klaim.jumlah_share)} share ·{" "}
+            {formatAngka(klaim.jumlah_view)} view ·{" "}
             {formatAngka(klaim.laju_sebar)}/jam
             {klaim.media_url && (
               <>
                 {" · "}
-                <a href={klaim.media_url} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                <a
+                  href={klaim.media_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-brand-600 hover:underline"
+                >
                   buka media viral
                 </a>
               </>
@@ -260,26 +298,45 @@ export function DetailKlaim({ id }: { id: string }) {
 
       {galat && <ErrorBox pesan={galat} onRetry={() => void muat()} />}
 
+      {proses && (
+        <Card>
+          <ProgresPipeline status={job} jenisMedia={klaim.jenis_media} />
+        </Card>
+      )}
+
       {/* 2. Kesimpulan */}
       <Card>
         <div className="px-5 py-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Kesimpulan Netra</p>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Kesimpulan Netra
+          </p>
           {verifikasi ? (
             <div className="mt-2 space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge tone={WARNA_VERIFIKASI[verifikasi.status]}>{LABEL_VERIFIKASI[verifikasi.status]}</Badge>
+                <Badge tone={WARNA_VERIFIKASI[verifikasi.status]}>
+                  {LABEL_VERIFIKASI[verifikasi.status]}
+                </Badge>
                 {verifikasi.perlu_eskalasi && (
-                  <Badge tone="bg-amber-50 text-amber-800 ring-amber-200">Eskalasi ke petugas</Badge>
+                  <Badge tone="bg-amber-50 text-amber-800 ring-amber-200">
+                    Eskalasi ke petugas
+                  </Badge>
                 )}
                 {terbukti && (
-                  <span className="text-xs text-slate-500">keyakinan {persen(verifikasi.keyakinan)}</span>
+                  <span className="text-xs text-slate-500">
+                    keyakinan {persen(verifikasi.keyakinan)}
+                  </span>
                 )}
                 {verifikasi.waktu_proses_detik != null && (
-                  <span className="text-xs text-slate-400">· {verifikasi.waktu_proses_detik}s</span>
+                  <span className="text-xs text-slate-400">
+                    · diproses dalam{" "}
+                    {formatDurasi(verifikasi.waktu_proses_detik)}
+                  </span>
                 )}
               </div>
               {verifikasi.ringkasan && (
-                <p className="max-w-4xl text-sm leading-relaxed text-slate-700">{verifikasi.ringkasan}</p>
+                <p className="max-w-4xl text-sm leading-relaxed text-slate-700">
+                  {verifikasi.ringkasan}
+                </p>
               )}
               {verifikasi.perubahan.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -302,14 +359,20 @@ export function DetailKlaim({ id }: { id: string }) {
               )}
               {verifikasi.metode.length > 0 && (
                 <p className="text-xs text-slate-400">
-                  Metode: {verifikasi.metode.map((m) => LABEL_METODE[m] ?? m).join(" · ")}
+                  Metode:{" "}
+                  {verifikasi.metode
+                    .map((m) => LABEL_METODE[m] ?? m)
+                    .join(" · ")}
                 </p>
               )}
             </div>
+          ) : proses ? (
+            <p className="mt-2 text-sm text-slate-500">Menunggu hasil verifikasi…</p>
           ) : (
             <p className="mt-2 text-sm text-slate-500">
-              Belum diverifikasi. Klik <span className="font-medium">Jalankan verifikasi</span> untuk mencari
-              sumber asli dan menyusun paket bukti.
+              Belum diverifikasi. Klik{" "}
+              <span className="font-medium">Jalankan verifikasi</span> untuk
+              mencari sumber asli dan menyusun paket bukti.
             </p>
           )}
         </div>
@@ -323,7 +386,9 @@ export function DetailKlaim({ id }: { id: string }) {
             keterangan="Urutan dari yang paling mungkin asli."
           />
           {kandidat.length === 0 ? (
-            <Empty>Belum ada kandidat. Jalankan verifikasi untuk mencari sumber.</Empty>
+            <Empty>
+              Belum ada kandidat. Jalankan verifikasi untuk mencari sumber.
+            </Empty>
           ) : (
             <>
               <ol className="divide-y divide-slate-100">
@@ -333,7 +398,9 @@ export function DetailKlaim({ id }: { id: string }) {
                       <span
                         className={cn(
                           "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold",
-                          i === 0 ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600",
+                          i === 0
+                            ? "bg-brand-600 text-white"
+                            : "bg-slate-100 text-slate-600",
                         )}
                       >
                         {i + 1}
@@ -350,11 +417,18 @@ export function DetailKlaim({ id }: { id: string }) {
                         <p className="mt-0.5 text-xs text-slate-500">
                           {LABEL_SUMBER[k.jenis_sumber]}
                           {k.uploader ? ` · ${k.uploader}` : ""}
-                          {k.tanggal_unggah ? ` · ${formatTanggal(k.tanggal_unggah)}` : ""}
+                          {k.tanggal_unggah
+                            ? ` · ${formatTanggal(k.tanggal_unggah)}`
+                            : ""}
                           {k.ada_watermark ? " · watermark" : ""}
                         </p>
                         <div className="mt-2 max-w-xs">
-                          <SkorBar nilai={k.skor} label="Skor sumber asli" compact netral />
+                          <SkorBar
+                            nilai={k.skor}
+                            label="Skor sumber asli"
+                            compact
+                            netral
+                          />
                         </div>
                         <details className="mt-1.5 text-xs">
                           <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">
@@ -366,17 +440,22 @@ export function DetailKlaim({ id }: { id: string }) {
                               metode {k.metode}
                               {k.resolusi ? ` · ${k.resolusi}p` : ""}
                               {k.cuplikan ? ` · cuplikan ${k.cuplikan}` : ""}
-                              {k.kecocokan_audio != null ? ` · audio ${persen(k.kecocokan_audio)}` : ""}
+                              {k.kecocokan_audio != null
+                                ? ` · audio ${persen(k.kecocokan_audio)}`
+                                : ""}
                             </p>
                             <div className="flex flex-wrap gap-1.5">
-                              {Object.entries(k.rincian_skor).map(([komponen, nilai]) => (
-                                <span
-                                  key={komponen}
-                                  className="rounded bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 ring-1 ring-inset ring-slate-200"
-                                >
-                                  {URUTAN_RINCIAN[komponen] ?? komponen} {nilai.toFixed(2)}
-                                </span>
-                              ))}
+                              {Object.entries(k.rincian_skor).map(
+                                ([komponen, nilai]) => (
+                                  <span
+                                    key={komponen}
+                                    className="rounded bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-500 ring-1 ring-inset ring-slate-200"
+                                  >
+                                    {URUTAN_RINCIAN[komponen] ?? komponen}{" "}
+                                    {nilai.toFixed(2)}
+                                  </span>
+                                ),
+                              )}
                             </div>
                           </div>
                         </details>
@@ -391,7 +470,9 @@ export function DetailKlaim({ id }: { id: string }) {
                   onClick={() => setSemuaKandidat((v) => !v)}
                   className="w-full border-t border-slate-100 px-5 py-2.5 text-center text-xs font-medium text-brand-600 hover:bg-slate-50"
                 >
-                  {semuaKandidat ? "Tampilkan lebih sedikit" : `Tampilkan ${kandidat.length - 3} kandidat lain`}
+                  {semuaKandidat
+                    ? "Tampilkan lebih sedikit"
+                    : `Tampilkan ${kandidat.length - 3} kandidat lain`}
                 </button>
               )}
             </>
@@ -410,7 +491,10 @@ export function DetailKlaim({ id }: { id: string }) {
             ) : (
               <ul className="space-y-2 px-5 py-4">
                 {verifikasi.bukti.map((b, i) => (
-                  <li key={`${b.url}-${i}`} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <li
+                    key={`${b.url}-${i}`}
+                    className="rounded-lg border border-slate-200 px-3 py-2"
+                  >
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         {LABEL_JENIS_BUKTI[b.jenis] ?? b.jenis}
@@ -425,7 +509,11 @@ export function DetailKlaim({ id }: { id: string }) {
                         {new URL(b.url).hostname.replace("www.", "")}
                       </a>
                     </div>
-                    {b.teks_sumber && <p className="mt-1 text-sm text-slate-700">{b.teks_sumber}</p>}
+                    {b.teks_sumber && (
+                      <p className="mt-1 text-sm text-slate-700">
+                        {b.teks_sumber}
+                      </p>
+                    )}
                     {(b.teks_viral || b.catatan) && (
                       <details className="mt-1 text-xs text-slate-500">
                         <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">
@@ -433,7 +521,10 @@ export function DetailKlaim({ id }: { id: string }) {
                         </summary>
                         {b.teks_viral && (
                           <p className="mt-1">
-                            <span className="font-semibold text-slate-600">Viral:</span> {b.teks_viral}
+                            <span className="font-semibold text-slate-600">
+                              Viral:
+                            </span>{" "}
+                            {b.teks_viral}
                           </p>
                         )}
                         {b.catatan && <p className="mt-1">{b.catatan}</p>}
@@ -447,7 +538,11 @@ export function DetailKlaim({ id }: { id: string }) {
 
           <Card>
             <CardHeader judul="Keputusan petugas" />
-            <PanelPersetujuan claimId={klaim.claim_id} verifikasi={verifikasi} onSelesai={() => void muat()} />
+            <PanelPersetujuan
+              claimId={klaim.claim_id}
+              verifikasi={verifikasi}
+              onSelesai={() => void muat()}
+            />
           </Card>
         </div>
       </div>
@@ -455,17 +550,22 @@ export function DetailKlaim({ id }: { id: string }) {
       {/* 5. Draf (hanya bila ada) */}
       {draf && (
         <Card>
-          <CardHeader judul="Draf klarifikasi" keterangan="Wajib disetujui petugas sebelum tayang." />
+          <CardHeader
+            judul="Draf klarifikasi"
+            keterangan="Wajib disetujui petugas sebelum tayang."
+          />
           <DrafKlarifikasi
             draf={draf}
             visual={
-              verifikasi ? <PostinganIG
+              verifikasi ? (
+                <PostinganIG
                   klaim={klaim}
                   verifikasi={verifikasi}
                   kandidat={kandidat}
                   draf={draf}
                   simulasi={pencarian?.mode === "demo"}
-                /> : undefined
+                />
+              ) : undefined
             }
           />
         </Card>
@@ -476,17 +576,24 @@ export function DetailKlaim({ id }: { id: string }) {
         <details>
           <summary className="cursor-pointer select-none px-5 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50">
             Riwayat aksi ({riwayat.length}){" "}
-            <span className="font-normal text-slate-400">· jejak audit, tidak bisa diubah</span>
+            <span className="font-normal text-slate-400">
+              · jejak audit, tidak bisa diubah
+            </span>
           </summary>
           {riwayat.length === 0 ? (
             <Empty>Belum ada riwayat.</Empty>
           ) : (
             <ol className="divide-y divide-slate-100 border-t border-slate-100">
               {riwayat.map((r, i) => (
-                <li key={`${r.waktu}-${i}`} className="flex items-start gap-3 px-5 py-2.5 text-sm">
+                <li
+                  key={`${r.waktu}-${i}`}
+                  className="flex items-start gap-3 px-5 py-2.5 text-sm"
+                >
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-300" />
                   <div className="min-w-0">
-                    <p className="text-slate-800">{LABEL_AKSI[r.aksi] ?? r.aksi}</p>
+                    <p className="text-slate-800">
+                      {LABEL_AKSI[r.aksi] ?? r.aksi}
+                    </p>
                     <p className="text-xs text-slate-400">
                       {formatTanggalWaktu(r.waktu)}
                       {r.aktor ? ` · ${r.aktor}` : ""}
@@ -505,7 +612,9 @@ export function DetailKlaim({ id }: { id: string }) {
 function Info({ label, nilai }: { label: string; nilai: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</p>
+      <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+        {label}
+      </p>
       <p className="mt-0.5 text-sm text-slate-800">{nilai}</p>
     </div>
   );

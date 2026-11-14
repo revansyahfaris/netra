@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import ai
 import config
 import media_publik
+import progres
 from store.db import mode as db_mode
 from priority import hitung_prioritas
 from schemas import (
@@ -198,6 +199,7 @@ def _siapkan_konteks_sinyal(klaim: Klaim) -> tuple[KonteksSinyal | None, ai.Siny
     if ai.adalah_url_placeholder(str(klaim.media_url)):
         return None, None
 
+    progres.lapor("ekstraksi")
     sinyal = ai.ekstrak_sinyal_klaim(klaim, ambil_konten_eksternal=True)
     keyframe_urls = [
         url
@@ -391,6 +393,7 @@ def jalankan_verifikasi_lengkap(
     ambil_eksternal = (pencarian.mode != "demo") or any(
         not ai.adalah_url_placeholder(str(k.url)) for k in pencarian.kandidat
     )
+    progres.lapor("analisis")
     hasil_tahap2 = ai.jalankan_tahap2(
         klaim,
         pencarian,
@@ -398,8 +401,10 @@ def jalankan_verifikasi_lengkap(
         sinyal_klaim_awal=sinyal_awal,
         korroborasi=(proses or {}).get("korroborasi"),
     )
+    progres.lapor("verifikasi")
     hasil_v4 = ai.verifikasi_silang(klaim, hasil_tahap2)
     waktu = round(time.perf_counter() - mulai, 3)
+    progres.lapor("klarifikasi")
     hasil_v5 = ai.susun_hasil_verifikasi(
         klaim,
         hasil_tahap2,
@@ -462,10 +467,16 @@ class HasilPipeline(BaseModel):
     verifikasi: HasilVerifikasi
 
 
+class RiwayatTahap(BaseModel):
+    tahap: str
+    mulai: datetime
+
+
 class StatusPekerjaanPipeline(BaseModel):
     claim_id: str
     status_kerja: Literal["belum_dijalankan", "antre", "berjalan", "selesai", "gagal"]
     tahap_saat_ini: str = "menunggu"
+    riwayat_tahap: list[RiwayatTahap] = []
     dimulai_pada: datetime | None = None
     selesai_pada: datetime | None = None
     error: str | None = None
@@ -492,34 +503,51 @@ def _set_status_kerja(claim_id: str, **updates) -> StatusPekerjaanPipeline:
         return baru
 
 
+def _catat_tahap(claim_id: str, tahap: str) -> None:
+    """Catat tahap baru beserta waktunya (dipanggil dari modul pencarian/AI lewat progres.lapor)."""
+    with _LOCK_PEKERJAAN:
+        lama = _PEKERJAAN_PIPELINE.get(claim_id)
+        if lama is None or lama.tahap_saat_ini == tahap:
+            return
+        riwayat = [*lama.riwayat_tahap, RiwayatTahap(tahap=tahap, mulai=datetime.now(timezone.utc))]
+        _PEKERJAAN_PIPELINE[claim_id] = lama.model_copy(
+            update={"tahap_saat_ini": tahap, "riwayat_tahap": riwayat}
+        )
+
+
 def _jalankan_pipeline_sinkron(
     klaim: Klaim,
     url_manual: list[str] | None = None,
     *,
     saat_tahap: str | None = None,
 ) -> HasilPipeline:
-    if saat_tahap:
-        _set_status_kerja(klaim.claim_id, tahap_saat_ini="pencarian")
-    pencarian, proses, sinyal = _jalankan_pencarian_internal(klaim, url_manual)
-    if saat_tahap:
-        _set_status_kerja(klaim.claim_id, tahap_saat_ini="verifikasi")
-    hasil, tautan = jalankan_verifikasi_lengkap(
-        klaim,
-        pencarian,
-        proses=proses,
-        sinyal_klaim_awal=sinyal,
-    )
+    mulai = time.perf_counter()
+    token = progres.pasang((lambda t: _catat_tahap(klaim.claim_id, t)) if saat_tahap else None)
+    try:
+        pencarian, proses, sinyal = _jalankan_pencarian_internal(klaim, url_manual)
+        hasil, tautan = jalankan_verifikasi_lengkap(
+            klaim,
+            pencarian,
+            proses=proses,
+            sinyal_klaim_awal=sinyal,
+        )
+    finally:
+        progres.lepas(token)
+    # Waktu proses yang ditampilkan = total pipeline (unduh, cari, cocokkan, verifikasi)
+    hasil = hasil.model_copy(update={"waktu_proses_detik": round(time.perf_counter() - mulai, 1)})
     tersimpan = REPO.simpan_verifikasi(hasil, aktor="api", tautan_bukti=tautan)
     klaim_akhir = REPO.ambil_klaim(klaim.claim_id) or klaim
     return HasilPipeline(klaim=klaim_akhir, pencarian=pencarian, verifikasi=tersimpan)
 
 
 def _jalankan_job_pipeline(claim_id: str, url_manual: list[str]) -> None:
+    sekarang = datetime.now(timezone.utc)
     _set_status_kerja(
         claim_id,
         status_kerja="berjalan",
-        tahap_saat_ini="pencarian",
-        dimulai_pada=datetime.now(timezone.utc),
+        tahap_saat_ini="mulai",
+        riwayat_tahap=[RiwayatTahap(tahap="mulai", mulai=sekarang)],
+        dimulai_pada=sekarang,
         selesai_pada=None,
         error=None,
     )

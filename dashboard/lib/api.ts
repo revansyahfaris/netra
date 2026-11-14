@@ -51,6 +51,7 @@ export interface StatusPekerjaanPipeline {
   claim_id: string;
   status_kerja: "belum_dijalankan" | "antre" | "berjalan" | "selesai" | "gagal";
   tahap_saat_ini: string;
+  riwayat_tahap?: { tahap: string; mulai: string }[];
   dimulai_pada: string | null;
   selesai_pada: string | null;
   error: string | null;
