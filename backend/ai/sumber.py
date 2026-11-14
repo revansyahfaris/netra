@@ -256,19 +256,29 @@ def hitung_jendela_video(
 
 
 def transkrip_audio_aman(audio_path: Path | None, bahasa: str | None = "id") -> HasilSTT:
-    """Jalankan STT faster-whisper (Docker). Jika layanan mati/error, tandai 'tidak_aktif' tanpa fallback Gemini."""
+    """Jalankan STT utama (Groq/Whisper); fallback ke Gemini (3.1 Flash-Lite) bila gagal."""
     if audio_path is None:
         return HasilSTT(teks="", segmen=[], sumber_stt="kosong")
 
-    if not config.stt_aktif():
-        log.info("Layanan STT (faster-whisper) sedang tidak aktif (STT_BASE_URL kosong).")
-        return HasilSTT(teks="", segmen=[], sumber_stt="tidak_aktif")
+    alasan_gagal = "STT_BASE_URL kosong"
+    if config.stt_aktif():
+        try:
+            return stt.transkrip_audio(audio_path, bahasa=bahasa)
+        except stt.STTError as e:
+            alasan_gagal = str(e)
+            log.warning("Layanan STT utama gagal (%s); mencoba fallback Gemini.", e)
+    else:
+        log.info("Layanan STT utama tidak dikonfigurasi (STT_BASE_URL kosong).")
 
-    try:
-        return stt.transkrip_audio(audio_path, bahasa=bahasa)
-    except stt.STTError as e:
-        log.warning("Layanan STT (faster-whisper) sedang tidak aktif atau gagal dihubungi: %s", e)
-        return HasilSTT(teks="", segmen=[], sumber_stt="tidak_aktif")
+    if config.STT_GEMINI_FALLBACK and config.llm_aktif():
+        try:
+            hasil = stt.transkrip_audio_gemini(audio_path, bahasa=bahasa)
+            log.info("Fallback STT ke Gemini (%s) berhasil.", config.STT_GEMINI_MODEL)
+            return hasil
+        except stt.STTError as e:
+            log.warning("Fallback STT Gemini gagal (utama=%s): %s", alasan_gagal, e)
+
+    return HasilSTT(teks="", segmen=[], sumber_stt="tidak_aktif")
 
 
 def _gabung_snippet(kandidat: KandidatSumber) -> str:

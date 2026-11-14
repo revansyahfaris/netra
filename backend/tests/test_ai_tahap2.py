@@ -224,35 +224,78 @@ def test_ekstrak_sinyal_kandidat_video_memotong_sekitar_cuplikan(tmp_path, monke
     assert "KOMPASTV ARSIP 2019" in sinyal.teks_isi
 
 
-def test_transkrip_audio_aman_saat_stt_tidak_aktif_tanpa_gemini(tmp_path, monkeypatch):
+def test_transkrip_audio_aman_fallback_ke_gemini_saat_stt_utama_gagal(tmp_path, monkeypatch):
     aud = tmp_path / "suara.wav"
     aud.write_bytes(b"RIFF" + b"\x00" * 100)
+    tangkapan = []
 
-    def fail_docker(*args, **kwargs):
+    def fail_utama(*args, **kwargs):
         from ai import STTError
 
         raise STTError("connection refused")
 
-    gemini_dipanggil = {"n": 0}
+    def fake_gemini_multimodal(parts, **kwargs):
+        tangkapan.append(kwargs.get("model"))
+        return {
+            "text": "Klarifikasi resmi kepala dinas.",
+            "language": "id",
+            "segments": [{"start": 0.0, "end": 2.4, "text": "Klarifikasi resmi kepala dinas."}],
+        }
 
-    def fail_if_called(*args, **kwargs):
-        gemini_dipanggil["n"] += 1
-        raise AssertionError("Gemini tidak boleh dipanggil untuk fallback STT")
-
-    monkeypatch.setattr("ai.stt.transkrip_audio", fail_docker)
+    monkeypatch.setattr("ai.stt.transkrip_audio", fail_utama)
+    monkeypatch.setattr(config, "STT_BASE_URL", "https://api.groq.com/openai")
     monkeypatch.setattr(config, "GEMINI_API_KEY", "dummy-key")
-    monkeypatch.setattr("llm.tanya_multimodal_json", fail_if_called)
+    monkeypatch.setattr(config, "STT_GEMINI_FALLBACK", True)
+    monkeypatch.setattr(config, "STT_GEMINI_MODEL", "gemini-3.1-flash-lite")
+    monkeypatch.setattr("llm.tanya_multimodal_json", fake_gemini_multimodal)
 
     hasil = transkrip_audio_aman(aud)
-    assert hasil.sumber_stt == "tidak_aktif"
-    assert hasil.teks == ""
-    assert hasil.segmen == []
-    assert gemini_dipanggil["n"] == 0
+    assert hasil.sumber_stt == "gemini"
+    assert hasil.teks == "Klarifikasi resmi kepala dinas."
+    assert len(hasil.segmen) == 1
+    assert tangkapan == ["gemini-3.1-flash-lite"]
 
+    # Saat STT_BASE_URL kosong pun langsung fallback ke Gemini 3.1 Flash-Lite
     monkeypatch.setattr(config, "STT_BASE_URL", "")
     hasil_kosong_url = transkrip_audio_aman(aud)
-    assert hasil_kosong_url.sumber_stt == "tidak_aktif"
-    assert gemini_dipanggil["n"] == 0
+    assert hasil_kosong_url.sumber_stt == "gemini"
+    assert tangkapan == ["gemini-3.1-flash-lite", "gemini-3.1-flash-lite"]
+
+
+def test_transkrip_audio_aman_tidak_aktif_bila_fallback_mati_atau_keduanya_gagal(tmp_path, monkeypatch):
+    import llm
+
+    aud = tmp_path / "suara.wav"
+    aud.write_bytes(b"RIFF" + b"\x00" * 100)
+
+    def fail_utama(*args, **kwargs):
+        from ai import STTError
+
+        raise STTError("HTTP 503: service unavailable")
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Gemini tidak boleh dipanggil saat STT_GEMINI_FALLBACK=False")
+
+    monkeypatch.setattr("ai.stt.transkrip_audio", fail_utama)
+    monkeypatch.setattr(config, "STT_BASE_URL", "https://api.groq.com/openai")
+    monkeypatch.setattr(config, "GEMINI_API_KEY", "dummy-key")
+    monkeypatch.setattr(config, "STT_GEMINI_FALLBACK", False)
+    monkeypatch.setattr("llm.tanya_multimodal_json", fail_if_called)
+
+    hasil_off = transkrip_audio_aman(aud)
+    assert hasil_off.sumber_stt == "tidak_aktif"
+    assert hasil_off.teks == ""
+
+    # Fallback aktif tetapi Gemini juga gagal -> tetap aman (tidak_aktif), tidak melempar exception
+    monkeypatch.setattr(config, "STT_GEMINI_FALLBACK", True)
+    monkeypatch.setattr(
+        "llm.tanya_multimodal_json",
+        lambda *a, **kw: (_ for _ in ()).throw(llm.LLMError("HTTP 500")),
+    )
+    hasil_both_fail = transkrip_audio_aman(aud)
+    assert hasil_both_fail.sumber_stt == "tidak_aktif"
+    assert hasil_both_fail.teks == ""
+    assert hasil_both_fail.segmen == []
 
 
 def test_sinyal_konten_query_rag_menggabungkan_dan_deduplikasi():

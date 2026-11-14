@@ -31,11 +31,14 @@ SERPAPI_KEY = _key("SERPAPI_KEY")
 # Postgres (Neon). Kosongkan untuk memakai SQLite lokal (backend/data/netra.db)
 DATABASE_URL = _key("DATABASE_URL")
 
-# Layanan Speech-to-Text (Whisper/speaches, API kompatibel OpenAI)
+# Layanan Speech-to-Text (Groq/Whisper/speaches, API kompatibel OpenAI)
 STT_BASE_URL = os.getenv("STT_BASE_URL", "http://localhost:8100").rstrip("/")
 STT_API_KEY = _key("STT_API_KEY")
-# Default ringan untuk server CPU: Systran/faster-whisper-small (GPU bisa pakai deepdml/faster-whisper-large-v3-turbo-ct2)
+# Default ringan untuk server CPU: Systran/faster-whisper-small (Groq: whisper-large-v3-turbo)
 STT_MODEL = os.getenv("STT_MODEL", "Systran/faster-whisper-small")
+# Fallback STT ke Gemini bila layanan STT utama gagal atau STT_BASE_URL kosong
+STT_GEMINI_FALLBACK = os.getenv("STT_GEMINI_FALLBACK", "1") != "0"
+STT_GEMINI_MODEL = (os.getenv("STT_GEMINI_MODEL", "gemini-3.1-flash-lite").strip() or "gemini-3.1-flash-lite")
 # Isi data demo otomatis saat database masih kosong
 SEED_KALAU_KOSONG = os.getenv("SEED_KALAU_KOSONG", "1") != "0"
 # Izinkan POST /seed (reset data demo). Matikan saat dipakai sungguhan.

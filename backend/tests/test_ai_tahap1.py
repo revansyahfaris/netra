@@ -17,6 +17,7 @@ from ai import (
     ekstrak_keyframes,
     ekstrak_sinyal_media,
     transkrip_audio,
+    transkrip_audio_gemini,
 )
 
 
@@ -171,6 +172,51 @@ def test_transkrip_audio_error_http(tmp_path, monkeypatch):
     monkeypatch.setattr("httpx.post", fake_post)
     with pytest.raises(STTError):
         transkrip_audio(audio)
+
+
+def test_transkrip_audio_gemini_sukses(tmp_path, monkeypatch):
+    audio = tmp_path / "suara.wav"
+    audio.write_bytes(b"RIFF\x00\x00\x01\x02")
+    tangkapan = {}
+
+    def fake_multimodal(parts, **kwargs):
+        tangkapan["parts"] = parts
+        tangkapan["kwargs"] = kwargs
+        return {
+            "text": "TNI membantu warga terdampak banjir.",
+            "language": "id",
+            "segments": [
+                {"start": 0.0, "end": 3.2, "text": " TNI membantu warga terdampak banjir. "}
+            ],
+        }
+
+    monkeypatch.setattr("llm.tanya_multimodal_json", fake_multimodal)
+    monkeypatch.setattr(config, "STT_GEMINI_MODEL", "gemini-3.1-flash-lite")
+
+    hasil = transkrip_audio_gemini(audio, bahasa="id")
+    assert hasil.sumber_stt == "gemini"
+    assert hasil.teks == "TNI membantu warga terdampak banjir."
+    assert hasil.bahasa == "id"
+    assert len(hasil.segmen) == 1
+    assert hasil.segmen[0].start == 0.0 and hasil.segmen[0].end == 3.2
+    assert tangkapan["kwargs"]["model"] == "gemini-3.1-flash-lite"
+    assert tangkapan["kwargs"]["thinking"] == "minimal"
+    assert tangkapan["kwargs"]["suhu"] == 0.0
+    assert tangkapan["parts"][1]["inlineData"]["mimeType"] == "audio/wav"
+
+
+def test_transkrip_audio_gemini_error_llm(tmp_path, monkeypatch):
+    import llm
+
+    audio = tmp_path / "suara.wav"
+    audio.write_bytes(b"RIFF\x00\x00")
+
+    def fail_llm(*args, **kwargs):
+        raise llm.LLMError("HTTP 429: quota exceeded")
+
+    monkeypatch.setattr("llm.tanya_multimodal_json", fail_llm)
+    with pytest.raises(STTError):
+        transkrip_audio_gemini(audio)
 
 
 # ---------- Integrasi ffmpeg nyata (jika terpasang) ----------

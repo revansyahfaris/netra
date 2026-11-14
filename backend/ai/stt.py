@@ -11,8 +11,32 @@ from pathlib import Path
 import httpx
 
 import config
+import llm
 
 log = logging.getLogger("netra.ai.stt")
+
+MAKS_BYTES_AUDIO_GEMINI = 15 * 1024 * 1024
+
+SCHEMA_STT_GEMINI = {
+    "type": "OBJECT",
+    "properties": {
+        "text": {"type": "STRING"},
+        "language": {"type": "STRING"},
+        "segments": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "start": {"type": "NUMBER"},
+                    "end": {"type": "NUMBER"},
+                    "text": {"type": "STRING"},
+                },
+                "required": ["start", "end", "text"],
+            },
+        },
+    },
+    "required": ["text", "segments"],
+}
 
 MIME_AUDIO = {
     ".wav": "audio/wav",
@@ -104,20 +128,92 @@ def transkrip_audio(
         log.warning("Panggilan STT gagal: %s", e)
         raise STTError(str(e)) from e
 
-    segmen = [
-        SegmenTranskrip(
-            start=round(float(s.get("start", 0.0)), 2),
-            end=round(float(s.get("end", 0.0)), 2),
-            text=str(s.get("text", "")).strip(),
-        )
-        for s in (hasil.get("segments") or [])
-        if str(s.get("text", "")).strip()
-    ]
+    return _bangun_hasil_stt(hasil, sumber_stt="whisper_docker")
+
+
+def _angka_detik(nilai: object) -> float:
+    try:
+        return round(max(0.0, float(nilai)), 2)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _bangun_hasil_stt(
+    hasil: dict,
+    sumber_stt: str,
+    default_bahasa: str | None = None,
+) -> HasilSTT:
+    segmen: list[SegmenTranskrip] = []
+    for item in hasil.get("segments") or []:
+        if not isinstance(item, dict):
+            continue
+        teks_segmen = str(item.get("text", "")).strip()
+        if not teks_segmen:
+            continue
+        mulai = _angka_detik(item.get("start", 0.0))
+        selesai = _angka_detik(item.get("end", mulai))
+        segmen.append(SegmenTranskrip(start=mulai, end=max(mulai, selesai), text=teks_segmen))
+
+    teks_utuh = str(hasil.get("text", "")).strip() or " ".join(s.text for s in segmen)
+    durasi_mentah = hasil.get("duration")
+    try:
+        durasi = float(durasi_mentah) if durasi_mentah is not None else None
+    except (TypeError, ValueError):
+        durasi = None
     return HasilSTT(
-        teks=str(hasil.get("text", "")).strip(),
+        teks=teks_utuh,
         segmen=segmen,
-        bahasa=hasil.get("language"),
-        durasi=hasil.get("duration"),
-        sumber_stt="whisper_docker",
+        bahasa=hasil.get("language") or default_bahasa,
+        durasi=durasi,
+        sumber_stt=sumber_stt,
     )
+
+
+def _prompt_transkrip_gemini(bahasa: str | None) -> str:
+    aturan_bahasa = (
+        f"Bahasa utama ucapan adalah '{bahasa}' (kode ISO-639-1). Transkripsikan apa adanya sesuai ucapan asli tanpa menerjemahkan."
+        if bahasa
+        else "Deteksi bahasa ucapan aslinya dan transkripsikan apa adanya tanpa menerjemahkan."
+    )
+    return (
+        "Transkripsikan ucapan dalam file audio ini secara akurat dan verbatim untuk verifikasi fakta.\n"
+        f"{aturan_bahasa}\n"
+        "Aturan:\n"
+        "- Jangan mengarang kata yang tidak diucapkan; jika hanya musik/hening tanpa ucapan, isi `text` dengan string kosong `\"\"` dan `segments` kosong `[]`.\n"
+        "- Isi `text` dengan transkrip lengkap, `language` dengan kode bahasa (mis. `id`), dan `segments` berisi potongan kalimat berurutan dengan timestamp `start` & `end` dalam detik."
+    )
+
+
+def transkrip_audio_gemini(
+    audio_path: Path | None,
+    bahasa: str | None = "id",
+    model: str | None = None,
+) -> HasilSTT:
+    """Transkripsikan audio memakai Gemini Flash-Lite multimodal sebagai fallback STT."""
+    if audio_path is None:
+        return HasilSTT(teks="", segmen=[], sumber_stt="kosong")
+    if not audio_path.exists():
+        raise STTError(f"File audio tidak ditemukan: {audio_path}")
+    if audio_path.stat().st_size > MAKS_BYTES_AUDIO_GEMINI:
+        batas_mb = MAKS_BYTES_AUDIO_GEMINI // (1024 * 1024)
+        raise STTError(f"Ukuran audio melebihi batas inline Gemini ({batas_mb} MB)")
+
+    mime = MIME_AUDIO.get(audio_path.suffix.lower())
+    model_id = model or config.STT_GEMINI_MODEL
+    try:
+        mentah = llm.tanya_multimodal_json(
+            [llm.part_teks(_prompt_transkrip_gemini(bahasa)), llm.part_file(audio_path, mime_type=mime)],
+            suhu=0.0,
+            skema=SCHEMA_STT_GEMINI,
+            timeout=config.STT_TIMEOUT,
+            model=model_id,
+            thinking="minimal",
+        )
+        if not isinstance(mentah, dict):
+            raise ValueError("Respons STT Gemini bukan JSON object")
+    except (llm.LLMError, ValueError, TypeError) as e:
+        log.warning("Fallback STT Gemini gagal: %s", e)
+        raise STTError(str(e)) from e
+
+    return _bangun_hasil_stt(mentah, sumber_stt="gemini", default_bahasa=bahasa)
 

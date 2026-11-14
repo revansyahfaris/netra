@@ -63,7 +63,14 @@ from .routing import (
     evaluasi_kandidat,
     jalankan_tahap2,
 )
-from .stt import HasilSTT, STTError, SegmenTranskrip, cek_kesehatan, transkrip_audio
+from .stt import (
+    HasilSTT,
+    STTError,
+    SegmenTranskrip,
+    cek_kesehatan,
+    transkrip_audio,
+    transkrip_audio_gemini,
+)
 from .sumber import (
     JenisKontenSumber,
     SinyalSumberAcuan,
@@ -171,5 +178,6 @@ __all__ = [
     "susun_parts_verifikasi",
     "transkrip_audio",
     "transkrip_audio_aman",
+    "transkrip_audio_gemini",
     "verifikasi_silang",
 ]
