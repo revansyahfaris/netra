@@ -14,7 +14,7 @@ import {
 } from "@/components/ui";
 import { DrafKlarifikasi } from "@/components/DrafKlarifikasi";
 import { PanelPersetujuan } from "@/components/PanelPersetujuan";
-import { SebelumSesudah } from "@/components/SebelumSesudah";
+import { PostinganIG } from "@/components/PostinganIG";
 import { api, ApiError, type KlaimLengkap } from "@/lib/api";
 import {
   cn,
@@ -459,10 +459,11 @@ export function DetailKlaim({ id }: { id: string }) {
           <DrafKlarifikasi
             draf={draf}
             visual={
-              verifikasi ? <SebelumSesudah
+              verifikasi ? <PostinganIG
                   klaim={klaim}
                   verifikasi={verifikasi}
                   kandidat={kandidat}
+                  draf={draf}
                   simulasi={pencarian?.mode === "demo"}
                 /> : undefined
             }

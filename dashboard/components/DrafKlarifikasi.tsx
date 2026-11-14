@@ -7,7 +7,7 @@ import { cn } from "@/lib/format";
 import { CopyButton } from "./ui";
 
 const TAB = [
-  { kunci: "visual", label: "Sebelum–sesudah" },
+  { kunci: "visual", label: "Postingan IG" },
   { kunci: "kartu", label: "Kartu teks" },
   { kunci: "pendek", label: "Versi pendek" },
   { kunci: "whatsapp", label: "WhatsApp" },
