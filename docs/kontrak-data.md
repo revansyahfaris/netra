@@ -104,7 +104,10 @@ Aturan:
 | `POST /cari/{id}` | cari kandidat | ada |
 | `GET /cari/{id}/proses` | log proses | ada |
 | `POST /verifikasi/{id}` | jalankan lapisan AI | ada |
-| `POST /pipeline/{id}` | cari + verifikasi | ada |
+| `POST /pipeline/{id}` | cari + verifikasi (sinkron) | ada |
+| `POST /pipeline/{id}/antre` | jadwalkan pipeline di latar belakang (`202`) | **baru** |
+| `GET /pipeline/{id}/status` | status pekerjaan pipeline latar belakang | **baru** |
+| `GET /media-sementara/{token}` | layani keyframe sementara bertanda tangan HMAC (Google Lens) | **baru** |
 | `PATCH /verifikasi/{id}/persetujuan` | setujui/tolak | **baru** |
 | `GET /bukti/{id}` | proyeksi publik untuk halaman bukti | **baru** |
 | `GET /statistik` | angka ringkas untuk dashboard/slide | **baru** |
@@ -114,9 +117,10 @@ Aturan:
 ## 6. Penyimpanan
 
 - Postgres (Neon) lewat `DATABASE_URL`; fallback `sqlite:///backend/data/netra.db` bila kosong.
-- Tabel: `netra_klaim`, `netra_pencarian`, `netra_verifikasi`, `netra_audit`.
-- Kolom index: `claim_id`, `status_pipeline`, `status_persetujuan`, `skor_prioritas`, `tanggal_ditemukan`.
-- Snapshot JSON disimpan utuh supaya kontrak bisa berubah tanpa migrasi besar.
+- Tabel inti: `netra_klaim`, `netra_pencarian`, `netra_verifikasi`, `netra_klaim_bukti`, `netra_audit`.
+- Tabel korpus RAG (`pgvector` di Postgres): `netra_korpus_dokumen` (`doc_id` deterministik dari hash URL ternormalisasi, `cakupan` `resmi`/`temuan`, `kadaluwarsa_pada` TTL 90 hari untuk `temuan`) dan `netra_korpus_chunk`.
+- Kolom index: `claim_id`, `status_pipeline`, `status_persetujuan`, `skor_prioritas`, `tanggal_ditemukan`, `doc_id`, `cakupan`.
+- Snapshot JSON disimpan utuh supaya kontrak bisa berubah tanpa migrasi besar; tautan bukti ke dokumen/chunk RAG ikut tercatat relasional di `netra_klaim_bukti`.
 
 ## Riwayat
 
@@ -124,3 +128,4 @@ Aturan:
 |---|---|---|---|
 | 11 Nov 2026 | v1 | kontrak awal | Faris |
 | 13 Nov 2026 | v2 | `judul`/`uploader`/`rincian_skor`, `Bukti`, `ringkasan`, persetujuan, `status_pipeline` | Farrel |
+| 14 Nov 2026 | v3 | Integrasi penuh AI Tahap 1–5, JIT Tier-2 `temuan`, `netra_klaim_bukti`, `/media-sementara/{token}`, `/pipeline/{id}/antre` & `/status` | Adriel |

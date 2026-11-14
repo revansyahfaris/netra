@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   Badge,
@@ -52,36 +52,120 @@ const URUTAN_RINCIAN: Record<string, string> = {
   resolusi: "Resolusi",
   bersih: "Bebas watermark",
   audio: "Audio",
+  korroborasi: "Korroborasi",
+};
+
+const LABEL_TAHAP: Record<string, string> = {
+  menunggu: "antre",
+  pencarian: "cari sumber & Lens",
+  verifikasi: "verifikasi AI",
 };
 
 export function DetailKlaim({ id }: { id: string }) {
   const [data, setData] = useState<KlaimLengkap | null>(null);
   const [galat, setGalat] = useState<string | null>(null);
   const [proses, setProses] = useState(false);
+  const [tahap, setTahap] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aktifRef = useRef(true);
 
-  const muat = useCallback(async () => {
+  const hentikanPoll = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const muat = useCallback(async (pertahankanGalat = false) => {
     try {
       setData(await api.klaim(id));
-      setGalat(null);
+      if (!pertahankanGalat) {
+        setGalat(null);
+      }
     } catch (e) {
       setGalat(e instanceof ApiError ? e.message : "Gagal memuat klaim.");
     }
   }, [id]);
 
+  const pantauJob = useCallback(async () => {
+    if (!aktifRef.current) return;
+    hentikanPoll();
+    try {
+      const st = await api.statusPipeline(id);
+      if (!aktifRef.current) return;
+      if (st.status_kerja === "antre" || st.status_kerja === "berjalan") {
+        setProses(true);
+        setTahap(st.tahap_saat_ini);
+        timerRef.current = setTimeout(() => {
+          void pantauJob();
+        }, 1500);
+        return;
+      }
+      setProses(false);
+      setTahap(null);
+      if (st.status_kerja === "gagal") {
+        const pesan = st.error || "Pipeline gagal dijalankan.";
+        await muat(true);
+        if (aktifRef.current) {
+          setGalat(pesan);
+        }
+        return;
+      }
+      if (st.status_kerja === "selesai") {
+        await muat();
+      }
+    } catch {
+      if (!aktifRef.current) return;
+      setProses(false);
+      setTahap(null);
+    }
+  }, [hentikanPoll, id, muat]);
+
   useEffect(() => {
-    void muat();
-  }, [muat]);
+    aktifRef.current = true;
+    setProses(false);
+    setTahap(null);
+    void muat().then(() => {
+      void api
+        .statusPipeline(id)
+        .then((st) => {
+          if (!aktifRef.current) return;
+          if (st.status_kerja === "antre" || st.status_kerja === "berjalan") {
+            setProses(true);
+            setTahap(st.tahap_saat_ini);
+            timerRef.current = setTimeout(() => {
+              void pantauJob();
+            }, 1500);
+          } else if (st.status_kerja === "gagal") {
+            setGalat(st.error || "Pipeline gagal dijalankan.");
+          }
+        })
+        .catch(() => {
+          /* abaikan bila status tidak tersedia */
+        });
+    });
+    return () => {
+      aktifRef.current = false;
+      hentikanPoll();
+    };
+  }, [hentikanPoll, id, muat, pantauJob]);
 
   async function jalankan() {
     setProses(true);
+    setTahap("menunggu");
     setGalat(null);
+    hentikanPoll();
     try {
-      await api.pipeline(id);
-      await muat();
+      const st = await api.antrePipeline(id);
+      if (!aktifRef.current) return;
+      setTahap(st.tahap_saat_ini);
+      timerRef.current = setTimeout(() => {
+        void pantauJob();
+      }, 1000);
     } catch (e) {
-      setGalat(e instanceof ApiError ? e.message : "Gagal menjalankan pipeline.");
-    } finally {
       setProses(false);
+      setTahap(null);
+      setGalat(e instanceof ApiError ? e.message : "Gagal menjadwalkan pipeline.");
     }
   }
 
@@ -120,7 +204,11 @@ export function DetailKlaim({ id }: { id: string }) {
             disabled={proses}
             className="rounded-lg bg-brand-600 px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {proses ? "Memproses…" : verifikasi ? "Cari & verifikasi ulang" : "Jalankan pencarian & verifikasi"}
+            {proses
+              ? `Memproses (${LABEL_TAHAP[tahap ?? ""] ?? tahap ?? "antre"})…`
+              : verifikasi
+                ? "Cari & verifikasi ulang"
+                : "Jalankan pencarian & verifikasi"}
           </button>
         </div>
       </div>

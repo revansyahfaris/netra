@@ -16,14 +16,17 @@ import numpy as np
 from PIL import Image
 
 import config
+from url_kanonis import normalisasi_url
 
-from . import dates, sources
+from . import dates, instagram, sources
 
 log = logging.getLogger("netra.frames")
 
 FPS_VIRAL = 1             # video viral: 1 frame per detik
 FPS_KANDIDAT = 4          # kandidat lebih rapat supaya tidak meleset karena beda titik potong
-MAKS_DETIK = 180          # batasi 3 menit pertama
+FPS_KASAR_PANJANG = 0.5   # scan awal hemat untuk video > 3 menit (1 frame per 2 detik)
+MAKS_DETIK = 180          # panjang satu jendela rapat (3 menit)
+MAKS_DETIK_PANJANG = 1800 # batas scan kasar video panjang (30 menit)
 JARAK_MIRIP = 10          # jarak pHash (0-64) <= ini dianggap frame yang sama
 JARAK_BEDA = 24           # jarak >= ini dianggap frame berbeda
 ENVELOPE_DETIK = 0.25     # resolusi envelope audio
@@ -56,7 +59,8 @@ def _cek_ffmpeg():
 
 
 def _folder_kerja(sumber: str) -> Path:
-    folder = config.WORK_DIR / hashlib.md5(sumber.encode()).hexdigest()[:12]
+    kunci = sumber if Path(sumber).exists() else (normalisasi_url(sumber) or sumber)
+    folder = config.WORK_DIR / hashlib.md5(kunci.encode()).hexdigest()[:12]
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 
@@ -68,6 +72,30 @@ def _detik_ke_teks(detik: float) -> str:
 
 # ---------- Info & unduh ----------
 
+def _info_video_instagram_embed(sumber: str) -> InfoVideo | None:
+    info = instagram.ambil_info_instagram_embed(sumber)
+    if not info or not info.video_urls:
+        return None
+    return InfoVideo(
+        url=normalisasi_url(sumber) or sumber,
+        judul=info.caption[:120],
+        uploader=info.uploader,
+        tanggal_unggah=info.tanggal_unggah,
+    )
+
+
+def _unduh_video_instagram_embed(sumber: str, folder: Path) -> Path | None:
+    info = instagram.ambil_info_instagram_embed(sumber)
+    if not info or not info.video_urls:
+        return None
+    for video_url in info.video_urls:
+        try:
+            return instagram.unduh_video_url(video_url, folder / "video.mp4")
+        except Exception as e:
+            log.debug("Fallback unduh video embed Instagram gagal (%s): %s", video_url[:60], e)
+    return None
+
+
 def info_video(sumber: str) -> InfoVideo:
     """Metadata tanpa mengunduh: tanggal unggah, resolusi tertinggi, uploader."""
     p = Path(sumber)
@@ -77,11 +105,15 @@ def info_video(sumber: str) -> InfoVideo:
     try:
         import yt_dlp
     except ImportError as e:
+        if ig := _info_video_instagram_embed(sumber):
+            return ig
         raise VideoError("yt-dlp belum terpasang") from e
     try:
         with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "skip_download": True}) as ydl:
             d = ydl.extract_info(sumber, download=False)
     except Exception as e:  # yt-dlp melempar banyak jenis error
+        if ig := _info_video_instagram_embed(sumber):
+            return ig
         raise VideoError(f"Gagal membaca info video: {e}") from e
     tinggi = max((f.get("height") or 0 for f in d.get("formats") or []), default=0) or d.get("height")
     return InfoVideo(
@@ -106,21 +138,33 @@ def siapkan_video(sumber: str) -> Path:
     try:
         import yt_dlp
     except ImportError as e:
+        if ig_path := _unduh_video_instagram_embed(sumber, folder):
+            return ig_path
         raise VideoError("yt-dlp belum terpasang") from e
     opsi = {
         "quiet": True,
         "no_warnings": True,
-        "format": "worst[height>=240]/worst",   # cukup untuk hashing, unduhan cepat
+        "format": (
+            "worst[height>=240][acodec!=none]/"
+            "worstvideo[height>=240]+worstaudio/"
+            "worst[acodec!=none]/worstvideo+worstaudio/worst"
+        ),
+        "merge_output_format": "mp4",
         "outtmpl": str(folder / "video.%(ext)s"),
-        "max_filesize": 150 * 1024 * 1024,
+        "max_filesize": instagram.MAKS_BYTES_VIDEO,
     }
     try:
         with yt_dlp.YoutubeDL(opsi) as ydl:
             ydl.download([sumber])
     except Exception as e:
+        # yt-dlp sering gagal pada carousel campuran / post IG tertentu: fallback ke embed video_url
+        if ig_path := _unduh_video_instagram_embed(sumber, folder):
+            return ig_path
         raise VideoError(f"Gagal mengunduh video: {e}") from e
     ada = list(folder.glob("video.*"))
     if not ada:
+        if ig_path := _unduh_video_instagram_embed(sumber, folder):
+            return ig_path
         raise VideoError("Video tidak terunduh")
     return ada[0]
 
@@ -149,24 +193,36 @@ def _ffprobe(path: Path) -> dict:
 
 # ---------- Frame ----------
 
-def hash_frame(video: Path, fps: int = FPS_VIRAL) -> list[tuple[float, imagehash.ImageHash]]:
+def hash_frame(
+    video: Path,
+    fps: float = FPS_VIRAL,
+    mulai_detik: float = 0.0,
+    durasi: float = MAKS_DETIK,
+) -> list[tuple[float, imagehash.ImageHash]]:
     """Ekstrak frame lalu hitung perceptual hash tiap frame.
     Tepi frame dipotong 10% supaya watermark/overlay di pojok tidak mengganggu."""
     _cek_ffmpeg()
-    folder = video.parent / f"frames_{video.stem}_{fps}"
+    mulai = max(0.0, float(mulai_detik))
+    folder = video.parent / f"frames_{video.stem}_{fps}_{int(mulai)}"
     if folder.exists():
         shutil.rmtree(folder)
     folder.mkdir(parents=True)
-    hasil = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(video), "-t", str(MAKS_DETIK), "-vf", f"fps={fps},crop=iw*0.8:ih*0.8,scale=256:-2", str(folder / "f_%04d.jpg")],
-        capture_output=True, text=True, timeout=180,
-    )
+    cmd = ["ffmpeg", "-v", "error"]
+    if mulai > 0:
+        cmd += ["-ss", str(mulai)]
+    cmd += [
+        "-i", str(video),
+        "-t", str(durasi),
+        "-vf", f"fps={fps},crop=iw*0.8:ih*0.8,scale=256:-2",
+        str(folder / "f_%04d.jpg"),
+    ]
+    hasil = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if hasil.returncode != 0:
         raise VideoError(f"ffmpeg gagal: {hasil.stderr[:200]}")
     frame = sorted(folder.glob("f_*.jpg"))
     if not frame:
         raise VideoError("Tidak ada frame yang bisa diambil")
-    return [(i / fps, imagehash.phash(Image.open(f))) for i, f in enumerate(frame)]
+    return [(mulai + i / fps, imagehash.phash(Image.open(f))) for i, f in enumerate(frame)]
 
 
 def cocokkan_frame(viral, kandidat) -> tuple[float, float | None]:
@@ -190,15 +246,20 @@ def cocokkan_frame(viral, kandidat) -> tuple[float, float | None]:
 
 # ---------- Audio ----------
 
-def envelope_audio(video: Path) -> np.ndarray | None:
+def envelope_audio(
+    video: Path,
+    mulai_detik: float = 0.0,
+    durasi: float = MAKS_DETIK,
+) -> np.ndarray | None:
     """Energi audio per 0.25 detik (None kalau video tanpa suara)."""
     _cek_ffmpeg()
     sr = 8000
-    hasil = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(video), "-t", str(MAKS_DETIK), "-ac", "1", "-ar", str(sr),
-         "-f", "s16le", "-"],
-        capture_output=True, timeout=180,
-    )
+    mulai = max(0.0, float(mulai_detik))
+    cmd = ["ffmpeg", "-v", "error"]
+    if mulai > 0:
+        cmd += ["-ss", str(mulai)]
+    cmd += ["-i", str(video), "-t", str(durasi), "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"]
+    hasil = subprocess.run(cmd, capture_output=True, timeout=180)
     if hasil.returncode != 0 or not hasil.stdout:
         return None
     x = np.frombuffer(hasil.stdout, dtype=np.int16).astype(np.float32)
@@ -232,6 +293,17 @@ def cocokkan_audio(a: np.ndarray | None, b: np.ndarray | None) -> float | None:
 
 # ---------- Gabungan ----------
 
+def _pilih_jendela_awal(viral, kandidat_kasar, durasi_total: float) -> float:
+    """Temukan detik mulai jendela rapat terbaik dari hasil scan kasar video panjang."""
+    _, detik = cocokkan_frame(viral, kandidat_kasar)
+    if detik is None and viral and kandidat_kasar:
+        _, detik = min((h - hk, t) for _, h in viral for t, hk in kandidat_kasar)
+    if detik is None:
+        return 0.0
+    maks_mulai = max(0.0, durasi_total - MAKS_DETIK)
+    return min(maks_mulai, max(0.0, float(detik) - 30.0))
+
+
 def bandingkan(viral_src: str, kandidat_src: str, cache: dict | None = None) -> HasilCocok:
     """Bandingkan video viral dengan satu kandidat. `cache` menyimpan hash viral supaya tidak dihitung ulang."""
     cache = cache if cache is not None else {}
@@ -241,8 +313,18 @@ def bandingkan(viral_src: str, kandidat_src: str, cache: dict | None = None) -> 
     h_viral, a_viral = cache["viral"]
 
     k = siapkan_video(kandidat_src)
-    kemiripan, detik = cocokkan_frame(h_viral, hash_frame(k, FPS_KANDIDAT))
-    audio = cocokkan_audio(a_viral, envelope_audio(k))
+    durasi_k = _ffprobe(k).get("durasi")
+    mulai = 0.0
+    if durasi_k is not None and durasi_k > MAKS_DETIK:
+        batas_kasar = min(float(durasi_k), float(MAKS_DETIK_PANJANG))
+        h_kasar = hash_frame(k, fps=FPS_KASAR_PANJANG, mulai_detik=0.0, durasi=batas_kasar)
+        mulai = _pilih_jendela_awal(h_viral, h_kasar, float(durasi_k))
+
+    kemiripan, detik = cocokkan_frame(
+        h_viral,
+        hash_frame(k, FPS_KANDIDAT, mulai_detik=mulai, durasi=MAKS_DETIK),
+    )
+    audio = cocokkan_audio(a_viral, envelope_audio(k, mulai_detik=mulai, durasi=MAKS_DETIK))
     return HasilCocok(kemiripan, detik, audio)
 
 
@@ -264,4 +346,6 @@ def temuan_dari_video(viral_src: str, kandidat_src: str, cache: dict | None = No
         ada_watermark=sources.perkiraan_watermark(info.url),
         kecocokan_audio=cocok.kecocokan_audio,
         uploader=info.uploader,
+        asal="phash",
+        kemiripan_frame=cocok.kemiripan,
     )

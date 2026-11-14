@@ -1,6 +1,7 @@
 /** Klien API Netra. Semua tipe mengikuti backend/schemas.py (kontrak v2). */
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, "") || "/api";
 
 export type LevelPrioritas = "tinggi" | "sedang" | "rendah";
 export type JenisMedia = "video" | "gambar" | "teks";
@@ -31,6 +32,29 @@ export interface Klaim {
   alasan: string | null;
   status_pipeline: StatusPipeline;
   sumber_masuk: "deteksi" | "manual";
+}
+
+export interface KlaimMasuk {
+  claim_id: string;
+  teks_klaim: string;
+  media_url?: string | null;
+  jenis_media: JenisMedia;
+  tanggal_ditemukan: string;
+  jumlah_share?: number;
+  jumlah_view?: number;
+  laju_sebar?: number;
+  pengikut_pengunggah?: number;
+  sumber_masuk?: "deteksi" | "manual";
+}
+
+export interface StatusPekerjaanPipeline {
+  claim_id: string;
+  status_kerja: "belum_dijalankan" | "antre" | "berjalan" | "selesai" | "gagal";
+  tahap_saat_ini: string;
+  dimulai_pada: string | null;
+  selesai_pada: string | null;
+  error: string | null;
+  mode_ai: boolean;
 }
 
 export interface KandidatSumber {
@@ -159,7 +183,13 @@ async function minta<T>(path: string, init?: RequestInit): Promise<T> {
     let pesan = `Permintaan gagal (${res.status})`;
     try {
       const body = await res.json();
-      if (typeof body.detail === "string") pesan = body.detail;
+      if (typeof body.detail === "string") {
+        pesan = body.detail;
+      } else if (Array.isArray(body.detail) && body.detail.length > 0) {
+        pesan = body.detail
+          .map((d: { msg?: string }) => d.msg ?? "Input tidak valid")
+          .join("; ");
+      }
     } catch {
       /* biarkan pesan default */
     }
@@ -179,7 +209,18 @@ export const api = {
     return minta<KlaimLengkap[]>(`/antrean${s ? `?${s}` : ""}`);
   },
   klaim: (id: string) => minta<KlaimLengkap>(`/klaim/${id}`),
+  tambahKlaim: (body: KlaimMasuk) =>
+    minta<Klaim>("/prioritas", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   pipeline: (id: string) => minta<unknown>(`/pipeline/${id}`, { method: "POST" }),
+  antrePipeline: (id: string, urlManual: string[] = []) =>
+    minta<StatusPekerjaanPipeline>(`/pipeline/${id}/antre`, {
+      method: "POST",
+      body: JSON.stringify({ url_manual: urlManual }),
+    }),
+  statusPipeline: (id: string) => minta<StatusPekerjaanPipeline>(`/pipeline/${id}/status`),
   cari: (id: string, urlManual: string[] = []) =>
     minta<HasilPencarian>(`/cari/${id}`, {
       method: "POST",

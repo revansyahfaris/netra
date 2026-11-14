@@ -1,20 +1,26 @@
 """Tes Tahap 3 modul Embedding (Gemini Embedding 2) & RAG (Neon pgvector)."""
 
+from datetime import datetime, timedelta, timezone
+
 import httpx
 import psycopg
 import pytest
 
 import config
 from ai import (
+    TTL_TEMUAN_DEFAULT_HARI,
     DokumenKorpus,
     EmbeddingError,
     HasilCariKorpus,
     RAGError,
+    bersihkan_temuan_kadaluwarsa,
     cari_korpus,
+    doc_id_dari_url,
     embed_multimodal,
     embed_teks,
     format_vector_pg,
     indeks_dokumen_teks,
+    normalisasi_url,
     potong_teks,
 )
 
@@ -89,9 +95,10 @@ def test_embed_gagal_saat_api_key_kosong(monkeypatch):
 
 
 class _FakeCursor:
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, rowcount=0):
         self.queries = []
         self._rows = rows or []
+        self.rowcount = rowcount
 
     def __enter__(self):
         return self
@@ -105,10 +112,13 @@ class _FakeCursor:
     def fetchall(self):
         return self._rows
 
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
 
 class _FakeConn:
-    def __init__(self, rows=None):
-        self.cur = _FakeCursor(rows=rows)
+    def __init__(self, rows=None, rowcount=0):
+        self.cur = _FakeCursor(rows=rows, rowcount=rowcount)
         self.committed = False
 
     def __enter__(self):
@@ -189,4 +199,229 @@ def test_cari_korpus_fallback_aman_saat_db_error(monkeypatch):
     assert cari_korpus("tes", fallback_aman=True) == []
     with pytest.raises(RAGError):
         cari_korpus("tes", fallback_aman=False)
+
+
+def test_normalisasi_url_artikel_dan_platform_video():
+    # Variasi artikel berita/resmi: http vs https, www/m, trailing slash, tracking, urutan query
+    u1 = "http://www.tniad.mil.id/berita/rilis-kasad/?utm_source=wa&fbclid=xyz&b=2&a=1#atas"
+    u2 = "HTTPS://m.tniad.mil.id/berita/rilis-kasad?a=1&b=2&gclid=999"
+    assert normalisasi_url(u1) == "https://tniad.mil.id/berita/rilis-kasad?a=1&b=2"
+    assert normalisasi_url(u1) == normalisasi_url(u2)
+
+    # Query berbeda tidak boleh dianggap sama
+    assert normalisasi_url("https://berita.id/artikel?id=10") != normalisasi_url("https://berita.id/artikel?id=20")
+
+    # Variasi YouTube mengarah ke satu URL kanonis (ID video tetap case-sensitive)
+    yt_varian = [
+        "https://www.youtube.com/watch?v=AbC123xyZ&feature=share&t=42s",
+        "http://m.youtube.com/watch?v=AbC123xyZ&si=tracker&list=PL99",
+        "https://youtu.be/AbC123xyZ?si=share&t=15",
+        "https://youtube.com/shorts/AbC123xyZ/",
+        "https://www.youtube.com/embed/AbC123xyZ",
+        "https://www.youtube.com/live/AbC123xyZ?pp=ygU",
+    ]
+    kanonis_yt = {normalisasi_url(u) for u in yt_varian}
+    assert kanonis_yt == {"https://youtube.com/watch?v=AbC123xyZ"}
+    assert normalisasi_url("https://youtu.be/abc123xyz") != "https://youtube.com/watch?v=AbC123xyZ"
+
+    # TikTok, Instagram, X/Twitter, Facebook, dan link lokal
+    assert (
+        normalisasi_url("https://www.tiktok.com/@dispenad/video/740000111?is_from_webapp=1&sender_device=pc")
+        == normalisasi_url("https://m.tiktok.com/@dispenad/video/740000111/")
+        == "https://tiktok.com/@dispenad/video/740000111"
+    )
+    assert normalisasi_url("https://vm.tiktok.com/ZM999/?_r=1") == "https://vm.tiktok.com/ZM999"
+    assert (
+        normalisasi_url("https://www.instagram.com/reels/Cabc123/?igsh=xyz")
+        == normalisasi_url("https://instagram.com/reel/Cabc123")
+        == "https://instagram.com/reel/Cabc123"
+    )
+    assert (
+        normalisasi_url("https://twitter.com/tni_ad/status/123456?s=20&t=abc")
+        == normalisasi_url("https://mobile.x.com/tni_ad/status/123456/")
+        == "https://x.com/tni_ad/status/123456"
+    )
+    assert (
+        normalisasi_url("https://m.facebook.com/watch/?v=998877&fbclid=aaa&mibextid=bbb")
+        == "https://facebook.com/watch?v=998877"
+    )
+    assert normalisasi_url("http://localhost:8100/health/") == "http://localhost:8100/health"
+
+
+def test_doc_id_deterministik_dan_dokumen_korpus(monkeypatch):
+    from pydantic import ValidationError
+
+    id_a = doc_id_dari_url("https://youtu.be/AbC123xyZ?si=1&t=30")
+    id_b = doc_id_dari_url("http://www.youtube.com/watch?v=AbC123xyZ&feature=share")
+    assert id_a == id_b
+    assert id_a.startswith("doc_") and len(id_a) == 28
+
+    dok1 = DokumenKorpus(judul="Video A", url="https://youtu.be/AbC123xyZ?si=1")
+    dok2 = DokumenKorpus(judul="Video A (sama)", url="https://www.youtube.com/watch?v=AbC123xyZ/")
+    assert dok1.doc_id == dok2.doc_id == id_a
+    assert dok1.url_kanonis == "https://youtube.com/watch?v=AbC123xyZ"
+
+    with pytest.raises(ValidationError):
+        DokumenKorpus(judul="Kosong", url="   ")
+
+    fake_conn = _FakeConn()
+    monkeypatch.setattr("ai.rag.embedding.embed_teks", lambda *a, **kw: [0.1, 0.2])
+    monkeypatch.setattr("ai.rag._koneksi", lambda dsn=None: fake_conn)
+    indeks_dokumen_teks(dok1, "Isi keterangan resmi kejadian.")
+    upsert_dok = next(q for q in fake_conn.cur.queries if "INSERT INTO netra_korpus_dokumen" in q[0])
+    assert upsert_dok[1][0] == id_a
+    assert upsert_dok[1][4] == "https://youtube.com/watch?v=AbC123xyZ"
+
+
+def test_cakupan_dan_ttl_dokumen_korpus(monkeypatch):
+    dok_resmi = DokumenKorpus(judul="Rilis Resmi", url="https://tniad.mil.id/rilis-1")
+    assert dok_resmi.cakupan == "resmi"
+    assert dok_resmi.kadaluwarsa_pada is None
+
+    sebelum = datetime.now(timezone.utc)
+    dok_temuan = DokumenKorpus(
+        judul="Berita Panen",
+        url="https://news.example.id/berita?utm_source=x",
+        jenis_sumber="media",
+        cakupan="temuan",
+    )
+    assert dok_temuan.cakupan == "temuan"
+    assert dok_temuan.kadaluwarsa_pada is not None
+    assert dok_temuan.kadaluwarsa_pada >= sebelum + timedelta(days=TTL_TEMUAN_DEFAULT_HARI - 1)
+
+    # Naive datetime dinormalisasi ke UTC, sedangkan None eksplisit tetap dipertahankan
+    dok_naive = DokumenKorpus(
+        judul="Naive TTL",
+        url="https://news.example.id/naive",
+        cakupan="temuan",
+        kadaluwarsa_pada=datetime(2026, 12, 1, 10, 0, 0),
+    )
+    assert dok_naive.kadaluwarsa_pada.tzinfo == timezone.utc
+
+    dok_temuan_permanen = DokumenKorpus(
+        judul="Temuan tanpa TTL",
+        url="https://news.example.id/tanpa-ttl",
+        cakupan="temuan",
+        kadaluwarsa_pada=None,
+    )
+    assert dok_temuan_permanen.kadaluwarsa_pada is None
+
+    fake_conn = _FakeConn()
+    monkeypatch.setattr("ai.rag.embedding.embed_teks", lambda *a, **kw: [0.1, 0.2])
+    monkeypatch.setattr("ai.rag._koneksi", lambda dsn=None: fake_conn)
+    indeks_dokumen_teks(dok_temuan, "Potongan isi berita pembanding.")
+
+    sql_upsert, params_upsert = next(
+        q for q in fake_conn.cur.queries if "INSERT INTO netra_korpus_dokumen" in q[0]
+    )
+    assert "WHEN netra_korpus_dokumen.cakupan = 'resmi' THEN 'resmi'" in sql_upsert
+    assert params_upsert[9] == "temuan"
+    assert params_upsert[10] == dok_temuan.kadaluwarsa_pada
+
+
+def test_filter_cakupan_dan_kadaluwarsa_di_cari_korpus(monkeypatch):
+    baris_temuan = (
+        7,
+        "doc_abc",
+        "Video Latihan 2021",
+        "2021-05-01",
+        "https://youtube.com/watch?v=abc",
+        "media",
+        "video",
+        "Rekaman latihan lapangan lama.",
+        0.8421,
+        12.0,
+        45.0,
+        "temuan",
+    )
+    fake_conn = _FakeConn(rows=[baris_temuan])
+    monkeypatch.setattr("ai.rag._koneksi", lambda dsn=None: fake_conn)
+    monkeypatch.setattr("ai.rag.embedding.embed_multimodal", lambda **kw: [0.2, 0.3])
+
+    hasil = cari_korpus("latihan gabungan", cakupan="temuan", batas=4)
+    assert len(hasil) == 1
+    assert hasil[0].cakupan == "temuan"
+
+    sql_vec, params_vec = fake_conn.cur.queries[-1]
+    assert "d.cakupan = ANY(%s)" in sql_vec
+    assert "d.kadaluwarsa_pada > NOW()" in sql_vec
+    assert ["temuan"] in params_vec
+
+    # Menyertakan dokumen kedaluwarsa + multi cakupan pada fallback keyword
+    def fail_embed(**kw):
+        raise EmbeddingError("mati")
+
+    monkeypatch.setattr("ai.rag.embedding.embed_multimodal", fail_embed)
+    cari_korpus(
+        "latihan gabungan",
+        cakupan=("resmi", "temuan", "resmi"),
+        sertakan_kadaluwarsa=True,
+    )
+    sql_kw, params_kw = fake_conn.cur.queries[-1]
+    assert "d.cakupan = ANY(%s)" in sql_kw
+    assert "d.kadaluwarsa_pada > NOW()" not in sql_kw
+    assert ["resmi", "temuan"] in params_kw
+
+    # Validasi nilai cakupan yang tidak dikenal/kosong
+    with pytest.raises(ValueError):
+        cari_korpus("uji", cakupan="asing")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        cari_korpus("uji", cakupan=[])
+
+
+def test_bersihkan_temuan_kadaluwarsa_dan_skema(monkeypatch):
+    from pathlib import Path
+
+    fake_conn = _FakeConn(rowcount=3)
+    monkeypatch.setattr("ai.rag._koneksi", lambda dsn=None: fake_conn)
+    terhapus = bersihkan_temuan_kadaluwarsa()
+    assert terhapus == 3
+    assert fake_conn.committed is True
+    sql_del, _ = fake_conn.cur.queries[0]
+    assert "DELETE FROM netra_korpus_dokumen" in sql_del
+    assert "cakupan = 'temuan'" in sql_del
+
+    schema_sql = (Path(__file__).resolve().parents[1] / "ai" / "schema_rag.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "cakupan VARCHAR(16)" in schema_sql
+    assert "kadaluwarsa_pada TIMESTAMPTZ" in schema_sql
+    assert "CREATE TABLE IF NOT EXISTS netra_klaim_bukti" in schema_sql
+    assert "DROP CONSTRAINT IF EXISTS fk_netra_klaim_bukti_doc_id" in schema_sql
+    assert "ADD CONSTRAINT fk_netra_klaim_bukti_doc_id" not in schema_sql
+
+
+def test_embed_multimodal_banyak_keyframe_dan_dokumen_masih_aktif(tmp_path, monkeypatch):
+    from ai import dokumen_masih_aktif
+
+    kf1 = tmp_path / "kf1.jpg"
+    kf2 = tmp_path / "kf2.jpg"
+    kf1.write_bytes(b"\xff\xd8\xff\xe0kf1")
+    kf2.write_bytes(b"\xff\xd8\xff\xe0kf2")
+
+    tertangkap = {}
+
+    def fake_embed_parts(parts, **kw):
+        tertangkap["parts"] = parts
+        return [0.4, 0.5]
+
+    monkeypatch.setattr("ai.embedding.embed_parts", fake_embed_parts)
+    vek = embed_multimodal(teks="rapat koordinasi", media_paths=[kf1, kf2])
+    assert vek == [0.4, 0.5]
+    assert sum(1 for p in tertangkap["parts"] if "inlineData" in p) == 2
+    assert any("text" in p for p in tertangkap["parts"])
+
+    # dokumen_masih_aktif mengembalikan True jika baris ditemukan, False jika kosong/error DB
+    monkeypatch.setattr("ai.rag._koneksi", lambda dsn=None: _FakeConn(rows=[(1,)]))
+    assert dokumen_masih_aktif("doc_aktif") is True
+
+    monkeypatch.setattr("ai.rag._koneksi", lambda dsn=None: _FakeConn(rows=[]))
+    assert dokumen_masih_aktif("doc_kosong") is False
+
+    def db_err(dsn=None):
+        raise RAGError("db mati")
+
+    monkeypatch.setattr("ai.rag._koneksi", db_err)
+    assert dokumen_masih_aktif("doc_err") is False
+
 

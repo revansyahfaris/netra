@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -53,6 +53,26 @@ class VerifikasiRow(Base):
     perlu_eskalasi: Mapped[bool] = mapped_column(default=False)
     data: Mapped[dict] = mapped_column(JSONType, nullable=False)
     diperbarui: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class KlaimBuktiRow(Base):
+    __tablename__ = "netra_klaim_bukti"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    claim_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("netra_klaim.claim_id", ondelete="CASCADE"), index=True
+    )
+    doc_id: Mapped[str | None] = mapped_column(String(128), index=True)
+    chunk_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    tier: Mapped[str] = mapped_column(String(32), default="tier2_rag")
+    metode: Mapped[str] = mapped_column(String(32), default="rag")
+    peran: Mapped[str] = mapped_column(String(32), default="pembanding")
+    skor: Mapped[float] = mapped_column(Float, default=0.0)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_kanonis: Mapped[str | None] = mapped_column(Text)
+    cuplikan: Mapped[str | None] = mapped_column(Text)
+    catatan: Mapped[str | None] = mapped_column(Text)
+    dibuat_pada: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class AuditRow(Base):

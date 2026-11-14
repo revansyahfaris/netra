@@ -4,6 +4,7 @@ Mendukung Matryoshka Representation Learning (outputDimensionality: 768, 1536, 3
 sehingga teks, gambar, dan klip video (<= 120 detik) berada dalam ruang vektor yang sama.
 """
 
+from collections.abc import Sequence
 import logging
 from pathlib import Path
 
@@ -83,20 +84,38 @@ def embed_multimodal(
     media_path: Path | None = None,
     task_type: str = "RETRIEVAL_QUERY",
     dimensi: int | None = None,
+    media_paths: Sequence[Path] | None = None,
 ) -> list[float]:
-    """Buat embedding gabungan teks + gambar/video (<= 120 detik) dalam satu vektor."""
-    parts: list[dict] = []
+    """Buat embedding gabungan teks + satu atau beberapa gambar/klip dalam satu vektor."""
+    daftar_media: list[Path] = []
     if media_path is not None:
-        if not media_path.exists():
-            raise EmbeddingError(f"File media tidak ditemukan: {media_path}")
-        if media_path.stat().st_size > MAKS_INLINE_BYTES:
-            raise EmbeddingError(
-                f"Ukuran media melebihi batas inline 15 MB ({media_path.name}); potong/kompres segmen terlebih dahulu"
+        daftar_media.append(media_path)
+    if media_paths:
+        for p in media_paths:
+            if p not in daftar_media:
+                daftar_media.append(p)
+
+    parts: list[dict] = []
+    total_bytes = 0
+    for idx, path_item in enumerate(daftar_media):
+        if not path_item.exists():
+            raise EmbeddingError(f"File media tidak ditemukan: {path_item}")
+        ukuran = path_item.stat().st_size
+        if total_bytes + ukuran > MAKS_INLINE_BYTES:
+            if idx == 0:
+                raise EmbeddingError(
+                    f"Ukuran media melebihi batas inline 15 MB ({path_item.name}); potong/kompres segmen terlebih dahulu"
+                )
+            log.warning(
+                "Melewati media tambahan %s agar total payload inline <= 15 MB",
+                path_item.name,
             )
+            break
         try:
-            parts.append(llm.part_file(media_path))
+            parts.append(llm.part_file(path_item))
         except llm.LLMError as e:
             raise EmbeddingError(str(e)) from e
+        total_bytes += ukuran
 
     if teks and teks.strip():
         parts.append(llm.part_teks(teks.strip()))
