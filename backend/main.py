@@ -9,6 +9,7 @@ Alur: POST /prioritas -> GET /antrean -> POST /cari/{id} -> POST /verifikasi/{id
 Atau sekaligus: POST /pipeline/{id}
 """
 
+import json
 import logging
 import threading
 import time
@@ -17,14 +18,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 import ai
 import config
 import media_publik
+import privasi
 import progres
 from store.db import mode as db_mode
 from priority import hitung_prioritas
@@ -71,6 +73,25 @@ app = FastAPI(title="Netra API", version="0.3.0", lifespan=lifespan)
 
 # Supaya dashboard (beda port/domain) bisa memanggil API ini
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def _samarkan_akun(request: Request, call_next):
+    """Samarkan akun media sosial pribadi di setiap respons JSON (lihat privasi.py)."""
+    respons = await call_next(request)
+    if (
+        not config.SAMARKAN_AKUN
+        or request.url.path in ("/openapi.json", "/docs", "/redoc")
+        or "application/json" not in respons.headers.get("content-type", "")
+    ):
+        return respons
+    isi = b"".join([bagian async for bagian in respons.body_iterator])
+    try:
+        data = privasi.samarkan(json.loads(isi))
+    except ValueError:
+        return Response(isi, status_code=respons.status_code, headers=dict(respons.headers))
+    header = {k: v for k, v in respons.headers.items() if k.lower() != "content-length"}
+    return JSONResponse(data, status_code=respons.status_code, headers=header)
 
 
 def _ambil_klaim(claim_id: str) -> Klaim:

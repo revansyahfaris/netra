@@ -85,6 +85,36 @@ ditulis tim di `backend/data/evaluasi_label.json`. Tambah `--live` untuk memakai
 
 Dokumen: [`PRD.md`](PRD.md) · [`task.md`](task.md) · [`docs/kontrak-data.md`](docs/kontrak-data.md) · [`docs/skrip-demo.md`](docs/skrip-demo.md)
 
+## Teknologi dan atribusi
+
+Seluruh kode di repositori ini ditulis tim selama periode Kartika Cyber Hackathon 2026 (repositori
+dimulai 11 November 2026). Tidak ada karya pre-existing yang dipakai sebagai dasar. Layanan dan pustaka
+pihak ketiga yang dipakai:
+
+| Bagian | Layanan atau pustaka | Lisensi atau ketentuan |
+|---|---|---|
+| LLM, OCR, embedding, cadangan STT | Google Gemini API (`gemini-3.1-flash-lite`, `gemini-embedding-2`) | Ketentuan Gemini API |
+| Speech-to-text | Groq API (Whisper), `faster-whisper` via speaches (model Systran) | Ketentuan Groq; MIT |
+| Pencarian web, YouTube, Google Lens | SerpAPI | Ketentuan SerpAPI |
+| Unduh media dan frame | `yt-dlp`, FFmpeg | Unlicense; LGPL/GPL |
+| Pencocokan frame | `imagehash`, Pillow, NumPy | BSD-2; MIT-CMU; BSD-3 |
+| Backend | FastAPI, Uvicorn, Pydantic, SQLAlchemy, psycopg, httpx | MIT; BSD-3; MIT; MIT; LGPL-3; BSD-3 |
+| Dashboard | Next.js, React, Tailwind CSS, `html-to-image` | MIT |
+| Database | PostgreSQL di Neon (pgvector untuk korpus RAG) | Ketentuan Neon; PostgreSQL License |
+| Hosting | Google Cloud, Cloudflare | Ketentuan layanan masing-masing |
+
+Setiap bukti, baik dari korpus rilis resmi maupun dari web, selalu menautkan sumber aslinya.
+
+## Data dan privasi
+
+- Kasus demo `c001` sampai `c004` sintetis dan diberi label SIMULASI. Kasus `r001` sampai `r003` adalah
+  peristiwa yang sudah diklarifikasi resmi dan hanya memuat nama pejabat publik serta media berita.
+- Nama akun media sosial pribadi disamarkan di setiap respons API (`SAMARKAN_AKUN=1`, bawaan):
+  tautan `x.com/<akun>/status/<id>` menjadi `x.com/i/status/<id>`, `@akun` di teks disamarkan, dan
+  pengunggah berjenis pribadi ditampilkan sebagai "Akun pribadi". Data asli tetap tersimpan untuk
+  pipeline.
+- Kunci API dan kredensial database hanya ada di `.env` server dan tidak pernah masuk repositori.
+
 ## Struktur
 
 ```
