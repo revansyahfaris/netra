@@ -14,8 +14,8 @@ Deteksi (sistem yang ada) → Prioritas → Verifikasi → Klarifikasi → Perse
 |---|---|
 | Demo | https://netra-app.tokorejeki.my.id |
 | API (Swagger) | https://netra-app.tokorejeki.my.id/api/docs |
-| Video presentasi | _(tautan menyusul)_ |
-| Slide | _(tautan menyusul)_ |
+| Video presentasi | https://youtu.be/zkf3Yehmm6Q |
+| Slide | https://canva.link/np73y7i9vgs8u58 |
 
 Tim: Muhammad Faris Revansyah (prioritas, pencarian sumber, API), Farrel Adhi Pratama (pipeline data,
 dashboard), Adriel Christofer Widya (lapisan AI: STT, OCR, RAG, verifikasi silang). Teknik Komputer,
